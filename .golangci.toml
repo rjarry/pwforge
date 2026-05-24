@@ -1,0 +1,43 @@
+version = "2"
+
+[run]
+# don't lint tests
+tests = false
+
+# enable additional linters
+[linters]
+enable = [
+	"nolintlint", # nolint comments require justification
+	"errorlint", # check to ensure no problems with wrapped errors
+	"gocritic", # check for bugs, performance, and style issues
+	"govet", # enable explicitly to tune printf checks
+]
+
+[linters.settings.nolintlint]
+allow-unused = false # don't allow nolint if not required
+require-explanation = true # require an explanation when disabling a linter
+requre-specific = true # linter exceptions must specify the linter
+
+[linters.exclusions]
+generated = "lax"
+presets = [
+	"comments",
+	"common-false-positives",
+	"legacy",
+	"std-error-handling"
+]
+paths = [
+]
+
+[formatters]
+enable = [
+	"gofmt"
+]
+
+[formatters.exclusions]
+generated = "lax"
+paths = [
+	"third_party$",
+	"builtin$",
+	"examples$"
+]
