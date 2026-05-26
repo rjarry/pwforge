@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 Robin Jarry <robin@jarry.cc>
+
+FROM python:3.13-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV DATABASE_TYPE=sqlite3
+ENV DATABASE_NAME=/data/patchwork.db.sqlite3
+ENV DJANGO_SETTINGS_MODULE=settings_testbed
+ENV PYTHONPATH=/opt/patchwork
+
+RUN apt-get update && apt-get install -y --no-install-recommends git postfix
+
+WORKDIR /opt/patchwork
+
+# clone upstream patchwork
+RUN git clone --depth=1 https://github.com/getpatchwork/patchwork /opt/patchwork
+
+# install python dependencies (only what we need, skip mysql/psycopg2)
+RUN pip install --no-cache-dir \
+	Django~=5.1.0 \
+	djangorestframework~=3.15.2 \
+	django-filter~=24.2.0
+
+# apply pwforge patches
+COPY *.patch /tmp/patches/
+RUN git config user.name Pwforge
+RUN git config user.email pwforge@pwforge.pw
+RUN git am -3 /tmp/patches/*.patch && rm -rf /tmp/patches
+
+COPY init.py /opt/patchwork/init.py
+COPY settings_testbed.py /opt/patchwork/settings_testbed.py
+
+RUN mkdir -p /data && \
+	python manage.py migrate --noinput && \
+	python manage.py loaddata default_tags default_states default_projects && \
+	python init.py && \
+	cp /data/patchwork.db.sqlite3 /opt/patchwork/patchwork.db.pristine
+
+# postfix configuration
+COPY postfix/main.cf /etc/postfix/main.cf
+COPY postfix/master.cf /etc/postfix/master.cf
+COPY postfix/aliases /etc/postfix/aliases
+COPY postfix/header_checks /etc/postfix/header_checks
+COPY --chmod=755 entrypoint.sh /entrypoint.sh
+RUN postalias /etc/postfix/aliases
+RUN mkdir -p /root/Maildir/INBOX/{new,cur,tmp}
+
+EXPOSE 8888 587
+
+ENTRYPOINT ["/entrypoint.sh"]
+
+CMD ["/usr/local/bin/python", "manage.py", "runserver", "[::]:8888"]

@@ -1,0 +1,1 @@
+test-project: root, "|cd /opt/patchwork && /usr/local/bin/python3 manage.py parsemail >>/tmp/parsemail.log 2>&1"

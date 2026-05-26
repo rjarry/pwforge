@@ -1,0 +1,403 @@
+From 787430de0e21a3c806e01568ffce773f6ce8e608 Mon Sep 17 00:00:00 2001
+From: Robin Jarry <robin@jarry.cc>
+Date: Tue, 26 May 2026 15:28:19 +0200
+Subject: [PATCH 6/6] series: add respin tracking for patch series versions
+
+When a new version of a patch series is received (e.g. [PATCH v3]),
+automatically link it to the previous version via a new previous_series
+foreign key on the Series model. This creates a version chain that can
+be walked in both directions to find all versions of a series.
+
+The matching heuristic works in two tiers. First, In-Reply-To and
+References headers are checked against SeriesReference entries to find
+a direct threading link to the previous version. This handles the
+common git send-email workflow where v2 is sent as a reply to v1.
+If no match is found through references, fall back to comparing series
+names and individual patch subjects using SequenceMatcher with a 0.8
+similarity threshold, filtered by same submitter and consecutive
+version number.
+
+A new per-project auto_supersede boolean (default off) allows
+automatically marking all patches of the previous series version as
+"Superseded" when a newer version is linked.
+
+The REST API exposes previous_series and next_series fields on the
+series endpoint (API v1.5). The web UI shows a "Versions" row on the
+patch and cover letter detail pages with links to all versions.
+
+Signed-off-by: Robin Jarry <rjarry@redhat.com>
+---
+ patchwork/api/series.py                       |  15 ++-
+ .../migrations/0051_series_respin_tracking.py |  33 ++++++
+ patchwork/models.py                           |  34 ++++++
+ patchwork/parser.py                           | 112 ++++++++++++++++++
+ patchwork/templates/patchwork/submission.html |  15 +++
+ patchwork/tests/api/test_series.py            |   2 +-
+ patchwork/views/cover.py                      |   3 +
+ patchwork/views/patch.py                      |   2 +
+ 8 files changed, 213 insertions(+), 3 deletions(-)
+ create mode 100644 patchwork/migrations/0051_series_respin_tracking.py
+
+diff --git a/patchwork/api/series.py b/patchwork/api/series.py
+index 96062da45d24..71f26bcc91c1 100644
+--- a/patchwork/api/series.py
++++ b/patchwork/api/series.py
+@@ -33,6 +33,12 @@ class SeriesSerializer(BaseHyperlinkedModelSerializer):
+     dependents = HyperlinkedRelatedField(
+         read_only=True, view_name='api-series-detail', many=True
+     )
++    previous_series = HyperlinkedRelatedField(
++        read_only=True, view_name='api-series-detail'
++    )
++    next_series = HyperlinkedRelatedField(
++        read_only=True, view_name='api-series-detail', many=True
++    )
+ 
+     def get_web_url(self, instance):
+         request = self.context.get('request')
+@@ -72,6 +78,8 @@ class SeriesSerializer(BaseHyperlinkedModelSerializer):
+             'dependencies',
+             'dependents',
+             'metadata',
++            'previous_series',
++            'next_series',
+         )
+         read_only_fields = (
+             'date',
+@@ -84,11 +92,13 @@ class SeriesSerializer(BaseHyperlinkedModelSerializer):
+             'patches',
+             'dependencies',
+             'dependents',
++            'previous_series',
++            'next_series',
+         )
+         versioned_fields = {
+             '1.1': ('web_url',),
+             '1.4': ('dependencies', 'dependents'),
+-            '1.5': ('metadata',),
++            '1.5': ('metadata', 'previous_series', 'next_series'),
+         }
+         extra_kwargs = {
+             'url': {'view_name': 'api-series-detail'},
+@@ -107,8 +117,9 @@ class SeriesMixin(object):
+                 'cover_letter__project',
+                 'dependencies',
+                 'dependents',
++                'next_series',
+             )
+-            .select_related('submitter', 'project')
++            .select_related('submitter', 'project', 'previous_series')
+         )
+ 
+ 
+diff --git a/patchwork/migrations/0051_series_respin_tracking.py b/patchwork/migrations/0051_series_respin_tracking.py
+new file mode 100644
+index 000000000000..c9b27c1ed467
+--- /dev/null
++++ b/patchwork/migrations/0051_series_respin_tracking.py
+@@ -0,0 +1,33 @@
++from django.db import migrations, models
++import django.db.models.deletion
++
++
++class Migration(migrations.Migration):
++    dependencies = [
++        ('patchwork', '0050_series_metadata'),
++    ]
++
++    operations = [
++        migrations.AddField(
++            model_name='series',
++            name='previous_series',
++            field=models.ForeignKey(
++                blank=True,
++                null=True,
++                on_delete=django.db.models.deletion.SET_NULL,
++                related_name='next_series',
++                to='patchwork.series',
++            ),
++        ),
++        migrations.AddField(
++            model_name='project',
++            name='auto_supersede',
++            field=models.BooleanField(
++                default=False,
++                help_text=(
++                    'Automatically mark patches of previous series versions '
++                    'as superseded when a new version is received.'
++                ),
++            ),
++        ),
++    ]
+diff --git a/patchwork/models.py b/patchwork/models.py
+index df6e63a25c3a..a74d649c0dae 100644
+--- a/patchwork/models.py
++++ b/patchwork/models.py
+@@ -104,6 +104,11 @@ class Project(models.Model):
+         default=False,
+         help_text='Enable dependency tracking for patches and cover letters.',
+     )
++    auto_supersede = models.BooleanField(
++        default=False,
++        help_text='Automatically mark patches of previous series versions '
++        'as superseded when a new version is received.',
++    )
+     use_tags = models.BooleanField(default=True)
+ 
+     def is_editable(self, user):
+@@ -858,6 +863,15 @@ class Series(FilenameMixin, models.Model):
+         related_query_name='dependent',
+     )
+ 
++    # respin tracking
++    previous_series = models.ForeignKey(
++        'self',
++        null=True,
++        blank=True,
++        on_delete=models.SET_NULL,
++        related_name='next_series',
++    )
++
+     # metadata
+     name = models.CharField(
+         max_length=255,
+@@ -970,6 +984,26 @@ class Series(FilenameMixin, models.Model):
+ 
+         return patch
+ 
++    def get_version_chain(self):
++        """Return all versions of this series, oldest first."""
++        chain = [self]
++        current = self
++        while current.previous_series_id:
++            current = current.previous_series
++            chain.append(current)
++        chain.reverse()
++        current = self
++        for newer in current.next_series.order_by('version'):
++            chain.append(newer)
++            # follow further respins from each newer version
++            queue = list(newer.next_series.order_by('version'))
++            while queue:
++                s = queue.pop(0)
++                if s not in chain:
++                    chain.append(s)
++                    queue.extend(s.next_series.order_by('version'))
++        return chain
++
+     def is_editable(self, user):
+         if not user.is_authenticated:
+             return False
+diff --git a/patchwork/parser.py b/patchwork/parser.py
+index c33ada8d7d42..cf56849f97ef 100644
+--- a/patchwork/parser.py
++++ b/patchwork/parser.py
+@@ -6,6 +6,7 @@
+ import codecs
+ import datetime
+ from datetime import timezone
++from difflib import SequenceMatcher
+ from email.header import decode_header
+ from email.header import make_header
+ from email.utils import mktime_tz
+@@ -335,6 +336,99 @@ def find_series(project, mail, author):
+     return _find_series_by_markers(project, mail, author)
+ 
+ 
++def _strip_name_prefixes(name):
++    """Strip leading bracketed prefixes from a series or patch name."""
++    if not name:
++        return ''
++    prefix_re = re.compile(r'^\[([^\]]*)\]\s*')
++    return prefix_re.sub('', name).strip()
++
++
++def _name_similarity(a, b):
++    """Return similarity ratio between two stripped names."""
++    a = _strip_name_prefixes(a)
++    b = _strip_name_prefixes(b)
++    if not a or not b:
++        return 0.0
++    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
++
++
++def find_previous_series(project, series, refs):
++    """Find the previous version of a series for respin tracking.
++
++    Uses a two-tier heuristic: first check mail references for a
++    direct threading link to the previous version, then fall back to
++    name and patch subject similarity matching.
++    """
++    if series.version <= 1:
++        return None
++
++    prev_version = series.version - 1
++
++    # tier 1: check In-Reply-To / References for a link to the
++    # previous version's series
++    for ref in refs:
++        try:
++            sr = SeriesReference.objects.get(
++                msgid=ref[:255], project=project
++            )
++        except SeriesReference.DoesNotExist:
++            continue
++        prev = sr.series
++        if prev.id == series.id:
++            continue
++        if prev.version == prev_version and prev.submitter == series.submitter:
++            return prev
++
++    # tier 2: name + submitter matching
++    candidates = Series.objects.filter(
++        project=project,
++        submitter=series.submitter,
++        version=prev_version,
++    ).order_by('-date')
++
++    if not candidates.exists():
++        return None
++
++    best = None
++    best_score = 0.0
++
++    for candidate in candidates:
++        score = _name_similarity(series.name, candidate.name)
++
++        # also check individual patch subjects for multi-patch series
++        new_patches = list(series.patches.values_list('name', flat=True))
++        if new_patches:
++            old_patches = list(
++                candidate.patches.values_list('name', flat=True)
++            )
++            if old_patches:
++                matches = 0
++                for np in new_patches:
++                    for op in old_patches:
++                        if _name_similarity(np, op) >= 0.8:
++                            matches += 1
++                            break
++                patch_ratio = matches / len(new_patches)
++                score = max(score, patch_ratio)
++
++        if score >= 0.8 and score > best_score:
++            best = candidate
++            best_score = score
++
++    return best
++
++
++def _mark_previous_as_superseded(series):
++    """Mark all patches in a series as superseded."""
++    try:
++        superseded = State.objects.get(slug='superseded')
++    except State.DoesNotExist:
++        logger.warning('No "superseded" state found, skipping auto-supersede')
++        return
++    series.patches.update(state=superseded)
++
++
+ def split_from_header(from_header):
+     name, email = (None, None)
+ 
+@@ -1391,6 +1485,15 @@ def parse_mail(mail, list_id=None):
+         # parse patch dependencies
+         series.add_dependencies(parse_depends_on(message))
+ 
++        # link to the previous version of this series
++        if not series.previous_series and version > 1:
++            prev = find_previous_series(project, series, refs)
++            if prev:
++                series.previous_series = prev
++                series.save()
++                if project.auto_supersede:
++                    _mark_previous_as_superseded(prev)
++
+         return patch
+     elif x == 0:  # (potential) cover letters
+         # if refs are empty, it's implicitly a cover letter. If not,
+@@ -1462,6 +1565,15 @@ def parse_mail(mail, list_id=None):
+             # entire patch series; parse them
+             series.add_dependencies(parse_depends_on(message))
+ 
++            # link to the previous version of this series
++            if not series.previous_series and version > 1:
++                prev = find_previous_series(project, series, refs)
++                if prev:
++                    series.previous_series = prev
++                    series.save()
++                    if project.auto_supersede:
++                        _mark_previous_as_superseded(prev)
++
+             return cover_letter
+ 
+     # comments
+diff --git a/patchwork/templates/patchwork/submission.html b/patchwork/templates/patchwork/submission.html
+index 2f3a08a2dce7..b79692399365 100644
+--- a/patchwork/templates/patchwork/submission.html
++++ b/patchwork/templates/patchwork/submission.html
+@@ -97,6 +97,21 @@
+     </td>
+   </tr>
+ {% endif %}
++{% if version_chain and version_chain|length > 1 %}
++  <tr>
++    <th>Versions</th>
++    <td>
++{% for s in version_chain %}
++{% if s.id == submission.series.id %}
++      <strong>v{{ s.version }}</strong>
++{% else %}
++      <a href="{{ s.get_absolute_url }}">v{{ s.version }}</a>
++{% endif %}
++{% if not forloop.last %} | {% endif %}
++{% endfor %}
++    </td>
++  </tr>
++{% endif %}
+ {% if submission.series.metadata %}
+   <tr>
+     <th>Metadata</th>
+diff --git a/patchwork/tests/api/test_series.py b/patchwork/tests/api/test_series.py
+index 3f3ec192fb6b..9a92e360c443 100644
+--- a/patchwork/tests/api/test_series.py
++++ b/patchwork/tests/api/test_series.py
+@@ -197,7 +197,7 @@ class TestSeriesAPI(utils.APITestCase):
+             create_cover(series=series_obj)
+             create_patch(series=series_obj)
+ 
+-        with self.assertNumQueries(8):
++        with self.assertNumQueries(9):
+             self.client.get(self.api_url())
+ 
+     @utils.store_samples('series-detail')
+diff --git a/patchwork/views/cover.py b/patchwork/views/cover.py
+index 15013a89e1ce..2a501cfed572 100644
+--- a/patchwork/views/cover.py
++++ b/patchwork/views/cover.py
+@@ -47,6 +47,9 @@ def cover_detail(request, project_id, msgid):
+     comments = comments.only('submitter', 'date', 'id', 'content', 'cover')
+     context['comments'] = comments
+ 
++    if cover.series:
++        context['version_chain'] = cover.series.get_version_chain()
++
+     return render(request, 'patchwork/submission.html', context)
+ 
+ 
+diff --git a/patchwork/views/patch.py b/patchwork/views/patch.py
+index efe94f17c942..fd36bf98461d 100644
+--- a/patchwork/views/patch.py
++++ b/patchwork/views/patch.py
+@@ -124,6 +124,8 @@ def patch_detail(request, project_id, msgid):
+     context['project'] = patch.project
+     context['related_same_project'] = related_same_project
+     context['related_different_project'] = related_different_project
++    if patch.series:
++        context['version_chain'] = patch.series.get_version_chain()
+     if errors:
+         context['errors'] = errors
+ 
+-- 
+2.54.0
+

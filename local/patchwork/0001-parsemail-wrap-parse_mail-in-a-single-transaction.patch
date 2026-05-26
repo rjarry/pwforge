@@ -1,0 +1,46 @@
+From b116d95f3d4cfaa6610d93f7fad6ebf012c54ed3 Mon Sep 17 00:00:00 2001
+From: Robin Jarry <robin@jarry.cc>
+Date: Tue, 26 May 2026 13:33:01 +0200
+Subject: [PATCH 1/6] parsemail: wrap parse_mail() in a single transaction
+
+Wrap the entire parse_mail() call in transaction.atomic() so that all
+database writes from email parsing run inside a single transaction.
+The existing transaction.atomic() blocks inside parse_mail() become
+savepoints within this outer transaction. The series deduplication
+retry logic continues to work since savepoint rollbacks are scoped
+to their own savepoint.
+
+This also ensures that any on_commit() callbacks registered by signal
+handlers only fire after the full email has been parsed and all
+patch/series associations are committed.
+
+Signed-off-by: Robin Jarry <robin@jarry.cc>
+---
+ patchwork/management/commands/parsemail.py | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/patchwork/management/commands/parsemail.py b/patchwork/management/commands/parsemail.py
+index bcb257fe9714..2f90047a991b 100644
+--- a/patchwork/management/commands/parsemail.py
++++ b/patchwork/management/commands/parsemail.py
+@@ -8,6 +8,7 @@ import logging
+ import sys
+ 
+ from django.core.management import base
++from django.db import transaction
+ 
+ from patchwork.parser import parse_mail
+ from patchwork.parser import DuplicateMailError
+@@ -57,7 +58,8 @@ class Command(base.BaseCommand):
+         # broken email (ValueError):   1 (this could be noisy, if it's an issue
+         #                                 we could use a different return code)
+         try:
+-            result = parse_mail(mail, options['list_id'])
++            with transaction.atomic():
++                result = parse_mail(mail, options['list_id'])
+             if result is None:
+                 logger.warning('Nothing added to database')
+         except DuplicateMailError as exc:
+-- 
+2.54.0
+

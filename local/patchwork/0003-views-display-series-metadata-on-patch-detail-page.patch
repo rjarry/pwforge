@@ -1,0 +1,66 @@
+From 16b0db14310441b7a8b65ee0baaae50cb2a73530 Mon Sep 17 00:00:00 2001
+From: Robin Jarry <robin@jarry.cc>
+Date: Tue, 26 May 2026 13:51:15 +0200
+Subject: [PATCH 3/6] views: display series metadata on patch detail page
+
+Show the series metadata key/value pairs on the patch detail page
+when metadata is present. This allows seeing external integration
+data (e.g. forge PR references) directly in the web UI.
+
+Signed-off-by: Robin Jarry <robin@jarry.cc>
+---
+ patchwork/templates/patchwork/submission.html | 13 +++++++++++++
+ patchwork/templatetags/utils.py               |  9 +++++++++
+ 2 files changed, 22 insertions(+)
+
+diff --git a/patchwork/templates/patchwork/submission.html b/patchwork/templates/patchwork/submission.html
+index cd74491c0e92..2f3a08a2dce7 100644
+--- a/patchwork/templates/patchwork/submission.html
++++ b/patchwork/templates/patchwork/submission.html
+@@ -97,6 +97,19 @@
+     </td>
+   </tr>
+ {% endif %}
++{% if submission.series.metadata %}
++  <tr>
++    <th>Metadata</th>
++    <td>
++      <dl class="patch-metadata">
++{% for key, value in submission.series.metadata.items %}
++        <dt>{{ key }}</dt>
++        <dd>{{ value|metadata_value }}</dd>
++{% endfor %}
++      </dl>
++    </td>
++  </tr>
++{% endif %}
+ {% if submission.related %}
+   <tr>
+     <th>Related</th>
+diff --git a/patchwork/templatetags/utils.py b/patchwork/templatetags/utils.py
+index 78c0aac80fc8..2060d08c9381 100644
+--- a/patchwork/templatetags/utils.py
++++ b/patchwork/templatetags/utils.py
+@@ -4,6 +4,7 @@
+ # SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ from django import template
++from django.utils.html import format_html
+ 
+ register = template.Library()
+ 
+@@ -16,3 +17,11 @@ def verbose_name_plural(obj):
+ @register.simple_tag
+ def is_editable(obj, user):
+     return obj.is_editable(user)
++
++
++@register.filter
++def metadata_value(value):
++    s = str(value)
++    if s.startswith(('http://', 'https://')):
++        return format_html('<a href="{}">{}</a>', s, s)
++    return s
+-- 
+2.54.0
+
