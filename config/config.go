@@ -33,6 +33,8 @@ type GitHubConfig struct {
 	WebhookSecret  string `ini:"webhook-secret"`
 	Owner          string `ini:"owner"`
 	Repo           string `ini:"repo"`
+	ForkOwner      string `ini:"fork-owner"`
+	ForkRepo       string `ini:"fork-repo"`
 	APIURL         string `ini:"api-url"`
 }
 

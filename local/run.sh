@@ -20,6 +20,8 @@ SCRIPT_DIR=$(dirname "$0")
 ROOT_DIR=$(git rev-parse --show-toplevel)
 GITHUB_REPO=${PWFORGE_TESTBED_REPO:-pwforge-testbed}
 GH_WEBHOOK_SECRET=${PWFORGE_WEBHOOK_SECRET:-testbed-webhook-secret}
+GH_UPSTREAM_OWNER=${PWFORGE_UPSTREAM_OWNER:-}
+GH_UPSTREAM_REPO=${PWFORGE_UPSTREAM_REPO:-}
 BUILDDIR="$ROOT_DIR/build"
 
 die() {
@@ -65,10 +67,17 @@ mkdir -p "$BUILDDIR"/{patchwork-db,maildir/INBOX/{new,cur,tmp},mirror}
 
 GH_USER=$(gh api user -q .login)
 GH_FULL_REPO="$GH_USER/$GITHUB_REPO"
+GH_WEBHOOK_REPO="${GH_UPSTREAM_OWNER:+$GH_UPSTREAM_OWNER/$GH_UPSTREAM_REPO}"
+GH_WEBHOOK_REPO="${GH_WEBHOOK_REPO:-$GH_FULL_REPO}"
 if ! gh repo view "$GH_FULL_REPO" >/dev/null 2>&1; then
-	echo "creating private github repo $GH_FULL_REPO..."
-	GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-		gh repo create "$GITHUB_REPO" --private --add-readme
+	if [ -n "$GH_UPSTREAM_OWNER" ]; then
+		echo "forking $GH_UPSTREAM_OWNER/$GH_UPSTREAM_REPO as $GH_FULL_REPO..."
+		gh repo fork "$GH_UPSTREAM_OWNER/$GH_UPSTREAM_REPO" \
+			--fork-name "$GITHUB_REPO" --clone=false
+	else
+		echo "creating github repo $GH_FULL_REPO..."
+		gh repo create "$GITHUB_REPO" --add-readme
+	fi
 	sleep 2
 fi
 GH_TOKEN=$(gh auth token)
@@ -145,8 +154,10 @@ project = test-project
 [github]
 token = $GH_TOKEN
 webhook-secret = $GH_WEBHOOK_SECRET
-owner = $GH_USER
-repo = $GITHUB_REPO
+owner = ${GH_UPSTREAM_OWNER:-$GH_USER}
+repo = ${GH_UPSTREAM_REPO:-$GITHUB_REPO}
+$([ -n "$GH_UPSTREAM_OWNER" ] && echo "fork-owner = $GH_USER")
+$([ -n "$GH_UPSTREAM_REPO" ] && echo "fork-repo = $GITHUB_REPO")
 
 [smtp]
 host = localhost
@@ -166,9 +177,9 @@ if ! gh extension list 2>/dev/null | grep -q cli/gh-webhook; then
 fi
 
 # clean up stale webhooks from previous runs
-for hook_id in $(gh api "repos/$GH_FULL_REPO/hooks" -q '.[].id' 2>/dev/null); do
+for hook_id in $(gh api "repos/$GH_WEBHOOK_REPO/hooks" -q '.[].id' 2>/dev/null); do
 	echo "deleting stale webhook $hook_id..."
-	gh api -X DELETE "repos/$GH_FULL_REPO/hooks/$hook_id" 2>/dev/null || true
+	gh api -X DELETE "repos/$GH_WEBHOOK_REPO/hooks/$hook_id" 2>/dev/null || true
 done
 
 # -- add tmux windows ---------------------------------------------------------
@@ -227,7 +238,7 @@ tmux new-window -d -n pwforge $BUILDDIR/watch_pwforge.sh
 # window 4: webhook forwarding
 tmux new-window -d -n webhooks \
 	"gh webhook forward \
-		--repo=$GH_FULL_REPO \
+		--repo=$GH_WEBHOOK_REPO \
 		--events='*' \
 		--url=http://localhost:9090/forge \
 		--secret=$GH_WEBHOOK_SECRET; \

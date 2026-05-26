@@ -27,6 +27,8 @@ type GitHub struct {
 	client        *gh.Client
 	owner         string
 	repo          string
+	forkOwner     string
+	forkRepo      string
 	webhookSecret string
 	ts            *TokenSource
 	baseBranch    string
@@ -61,10 +63,21 @@ func New(conf *config.Config) (models.Forge, error) {
 		client.BaseURL = u
 	}
 
+	forkOwner := conf.GitHub.ForkOwner
+	if forkOwner == "" {
+		forkOwner = conf.GitHub.Owner
+	}
+	forkRepo := conf.GitHub.ForkRepo
+	if forkRepo == "" {
+		forkRepo = conf.GitHub.Repo
+	}
+
 	return &GitHub{
 		client:        client,
 		owner:         conf.GitHub.Owner,
 		repo:          conf.GitHub.Repo,
+		forkOwner:     forkOwner,
+		forkRepo:      forkRepo,
 		webhookSecret: conf.GitHub.WebhookSecret,
 		ts:            ts,
 	}, nil
@@ -89,7 +102,7 @@ func (g *GitHub) BaseBranch() (string, error) {
 }
 
 func (g *GitHub) RepoURL() string {
-	return fmt.Sprintf("https://github.com/%s/%s.git", g.owner, g.repo)
+	return fmt.Sprintf("https://github.com/%s/%s.git", g.forkOwner, g.forkRepo)
 }
 
 func (g *GitHub) WriteCredentials(path string) error {
@@ -114,6 +127,9 @@ func (g *GitHub) PRRefSpec(prNumber int) string {
 }
 
 func (g *GitHub) CreatePR(title, body, head, base string) (int, error) {
+	if g.forkOwner != g.owner {
+		head = g.forkOwner + ":" + head
+	}
 	pr, _, err := g.client.PullRequests.Create(
 		context.Background(),
 		g.owner, g.repo,
