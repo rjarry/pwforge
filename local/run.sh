@@ -31,15 +31,23 @@ die() {
 
 
 cleanup() {
-	if [ "$?" -ne 0 ]; then
+	local rc=$?
+	set +e
+	if [ "$rc" -ne 0 ]; then
 		echo
 		read -rp 'press enter to close'
 	fi
-	set +e
-	pids=$(tmux list-panes -f '#{pane_pid}' | xargs echo)
-	pkill -g ${pids/ /,}
-	wait $pids
-	tmux kill-server
+	# stop containers first
+	podman rm -f pwforge-patchwork pwforge-postfix 2>/dev/null
+	# kill all pane process trees
+	local pids=$(tmux list-panes -a -F '#{pane_pid}' 2>/dev/null)
+	for pid in $pids; do
+		if ! [ "$pid" = "$$" ]; then
+			kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null
+		fi
+	done
+	# this kills our own shell last
+	tmux kill-server 2>/dev/null
 }
 
 trap cleanup EXIT
