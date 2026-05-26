@@ -121,11 +121,8 @@ func (g *ForgeToML) HandlePullRequest(
 	if err := git.EnsureMirror(); err != nil {
 		return err
 	}
-	if err := git.FetchRef(event.PRHead); err != nil {
-		return fmt.Errorf("fetch PR head: %w", err)
-	}
-	if err := git.FetchRef(event.PRBase); err != nil {
-		return fmt.Errorf("fetch PR base: %w", err)
+	if err := git.Fetch(); err != nil {
+		return err
 	}
 
 	workdir, err := os.MkdirTemp("", "pwforge-pr-*")
