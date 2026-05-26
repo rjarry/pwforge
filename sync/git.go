@@ -57,6 +57,11 @@ func (m *GitMirror) EnsureMirror() error {
 		m.forge.RepoURL(), m.conf.MirrorPath); err != nil {
 		return err
 	}
+	// also fetch pull request heads
+	if err := m.git("-C", m.conf.MirrorPath, "config", "--add",
+		"remote.origin.fetch", "+refs/pull/*/head:refs/pull/*/head"); err != nil {
+		return err
+	}
 	// configure credential helper for future operations
 	return m.git("-C", m.conf.MirrorPath, "config",
 		"credential.helper", "store --file="+
@@ -67,12 +72,6 @@ func (m *GitMirror) Fetch() error {
 	log.Printf("git: fetching mirror %s", m.conf.MirrorPath)
 	return m.withCredentials(func() error {
 		return m.git("-C", m.conf.MirrorPath, "fetch", "--all", "--prune")
-	})
-}
-
-func (m *GitMirror) FetchRef(ref string) error {
-	return m.withCredentials(func() error {
-		return m.git("-C", m.conf.MirrorPath, "fetch", "origin", ref)
 	})
 }
 

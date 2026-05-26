@@ -285,7 +285,7 @@ func (g *GitHub) parsePullRequest(body []byte) (*models.ForgeEvent, error) {
 		PRTitle:      pr.GetTitle(),
 		PRBody:       pr.GetBody(),
 		PRHead:       fmt.Sprintf("pull/%d/head", pr.GetNumber()),
-		PRBase:       fmt.Sprintf("pull/%d/base", pr.GetNumber()),
+		PRBase:       pr.GetBase().GetSHA(),
 		PRHeadBranch: pr.GetHead().GetRef(),
 		PRAction:     action,
 		PRBefore:     payload.GetBefore(),
