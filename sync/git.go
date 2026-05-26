@@ -18,11 +18,12 @@ import (
 
 type GitMirror struct {
 	conf  *config.GitConfig
+	smtp  *config.SMTPConfig
 	forge models.Forge
 }
 
-func NewGitMirror(conf *config.GitConfig, forge models.Forge) *GitMirror {
-	return &GitMirror{conf: conf, forge: forge}
+func NewGitMirror(conf *config.GitConfig, smtp *config.SMTPConfig, forge models.Forge) *GitMirror {
+	return &GitMirror{conf: conf, smtp: smtp, forge: forge}
 }
 
 func (m *GitMirror) withCredentials(fn func() error) error {
@@ -35,37 +36,70 @@ func (m *GitMirror) withCredentials(fn func() error) error {
 }
 
 func (m *GitMirror) EnsureMirror() error {
-	if _, err := os.Stat(filepath.Join(m.conf.MirrorPath, "HEAD")); err == nil {
-		return nil
+	if _, err := os.Stat(filepath.Join(m.conf.MirrorPath, "HEAD")); err != nil {
+		// create a temporary credentials file for the clone
+		tmpCred, err := os.CreateTemp("", "pwforge-cred-*")
+		if err != nil {
+			return err
+		}
+		tmpCred.Close()
+		defer os.Remove(tmpCred.Name())
+
+		log.Printf("git: cloning mirror to %s", m.conf.MirrorPath)
+		if err := os.MkdirAll(filepath.Dir(m.conf.MirrorPath), 0o755); err != nil {
+			return err
+		}
+		if err := m.forge.WriteCredentials(tmpCred.Name()); err != nil {
+			return fmt.Errorf("credentials: %w", err)
+		}
+		if err := m.git("clone", "--mirror",
+			"-c", "credential.helper=store --file="+tmpCred.Name(),
+			m.forge.RepoURL(), m.conf.MirrorPath); err != nil {
+			return err
+		}
 	}
-	log.Printf("git: cloning mirror to %s", m.conf.MirrorPath)
-	if err := os.MkdirAll(filepath.Dir(m.conf.MirrorPath), 0o755); err != nil {
-		return err
-	}
-	// create a temporary credentials file for the clone
-	tmpCred, err := os.CreateTemp("", "pwforge-cred-*")
-	if err != nil {
-		return err
-	}
-	tmpCred.Close()
-	defer os.Remove(tmpCred.Name())
-	if err := m.forge.WriteCredentials(tmpCred.Name()); err != nil {
-		return fmt.Errorf("credentials: %w", err)
-	}
-	if err := m.git("clone", "--mirror",
-		"-c", "credential.helper=store --file="+tmpCred.Name(),
-		m.forge.RepoURL(), m.conf.MirrorPath); err != nil {
-		return err
-	}
+
 	// also fetch pull request heads
 	if err := m.git("-C", m.conf.MirrorPath, "config", "--add",
 		"remote.origin.fetch", "+refs/pull/*/head:refs/pull/*/head"); err != nil {
 		return err
 	}
+
 	// configure credential helper for future operations
-	return m.git("-C", m.conf.MirrorPath, "config",
-		"credential.helper", "store --file="+
-			filepath.Join(m.conf.MirrorPath, "pwforge-credentials"))
+	credHelper := fmt.Sprintf("store --file=%s",
+		filepath.Join(m.conf.MirrorPath, "pwforge-credentials"))
+
+	fromName, fromEmail := m.smtp.ParseFrom()
+
+	gitConfig := map[string]string{
+		"credential.helper":            credHelper,
+		"user.name":                    fromName,
+		"user.email":                   fromEmail,
+		"sendemail.to":                 m.smtp.To,
+		"sendemail.from":               m.smtp.From,
+		"sendemail.smtpServer":         m.smtp.Host,
+		"sendemail.smtpServerPort":     strconv.Itoa(m.smtp.Port),
+		"sendemail.smtpEncryption":     m.smtp.Encryption,
+		"sendemail.confirm":            "never",
+		"sendemail.validate":           "false",
+		"sendemail.chainreplyto":       "false",
+		"sendemail.envelopesender":     "auto",
+		"sendemail.assume8bitEncoding": "UTF-8",
+		"sendemail.suppressCc":         "self",
+		"sendemail.suppressFrom":       "true",
+		"format.subjectPrefix":         m.conf.SubjectPrefix,
+		"format.coverFromDescription":  "subject",
+	}
+	if m.smtp.Username != "" {
+		gitConfig["sendemail.smtpUser"] = m.smtp.Username
+		gitConfig["sendemail.smtpPass"] = m.smtp.Password
+	}
+	for k, v := range gitConfig {
+		if err := m.git("-C", m.conf.MirrorPath, "config", k, v); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *GitMirror) Fetch() error {
@@ -75,18 +109,24 @@ func (m *GitMirror) Fetch() error {
 	})
 }
 
-func (m *GitMirror) FormatPatch(
-	workdir, base, title, body, previousRef string, version int,
-) ([]byte, error) {
+func (m *GitMirror) SendPatches(
+	workdir, base, title, body, previousRef, inReplyTo string,
+	version int, extraHeaders ...string,
+) error {
 	args := []string{
-		"-C", workdir, "format-patch", "--stdout",
-		"--subject-prefix", m.conf.SubjectPrefix,
+		"-C", workdir, "send-email", "--force",
+		"--add-header=Reply-To: " + m.smtp.To,
+	}
+	for _, h := range extraHeaders {
+		args = append(args, "--add-header="+h)
 	}
 	if version > 1 {
 		args = append(args, fmt.Sprintf("-v%d", version))
 	}
+	if inReplyTo != "" {
+		args = append(args, "--in-reply-to="+inReplyTo)
+	}
 
-	// use a cover letter when there are multiple commits
 	nCommits, _ := m.commitCount(workdir, base)
 	if nCommits > 1 {
 		descFile := filepath.Join(workdir, ".cover-description")
@@ -104,7 +144,13 @@ func (m *GitMirror) FormatPatch(
 
 	args = append(args, base+"..HEAD")
 
-	return m.gitOutput(args...)
+	cmd := m.gitCmd(args...)
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s: %w", strings.Join(cmd.Args, " "), err)
+	}
+	return nil
 }
 
 func (m *GitMirror) commitCount(workdir, base string) (int, error) {
@@ -151,8 +197,6 @@ func (m *GitMirror) gitCmd(args ...string) *exec.Cmd {
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_SYSTEM=/dev/null",
 		"GIT_TERMINAL_PROMPT=0",
-		"GIT_COMMITTER_NAME="+m.conf.CommitterName,
-		"GIT_COMMITTER_EMAIL="+m.conf.CommitterEmail,
 	)
 	return cmd
 }

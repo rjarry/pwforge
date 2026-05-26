@@ -4,7 +4,6 @@
 package sync
 
 import (
-	"bytes"
 	"fmt"
 	"log"
 	"net/smtp"
@@ -136,104 +135,48 @@ func (g *ForgeToML) HandlePullRequest(
 	defer func() { _ = git.DelWorktree(workdir) }()
 
 	version := 1
+	var inReplyTo string
 	if event.PRAction == "synchronize" {
-		version = g.nextVersion(event, forge)
-	}
-
-	mbox, err := git.FormatPatch(
-		workdir, event.PRBase,
-		event.PRTitle, sanitizePRBody(event.PRBody),
-		event.PRBefore, version,
-	)
-	if err != nil {
-		return fmt.Errorf("format-patch: %w", err)
+		version, inReplyTo = g.nextVersionAndReplyTo(event, forge)
 	}
 
 	prURL := forge.PRRef(event.PRNumber)
-	return g.sendMbox(mbox, prURL)
+	return git.SendPatches(
+		workdir, event.PRBase,
+		event.PRTitle, sanitizePRBody(event.PRBody),
+		event.PRBefore, inReplyTo, version,
+		PRHeader+": "+prURL,
+	)
 }
 
-func (g *ForgeToML) nextVersion(
+func (g *ForgeToML) nextVersionAndReplyTo(
 	event *models.ForgeEvent, forge models.Forge,
-) int {
+) (int, string) {
 	prRef := forge.PRRef(event.PRNumber)
 	matches, err := g.pw.FindSeriesByMetadata("", forge.MetaKeyPR(), prRef)
 	if err != nil || len(matches) == 0 {
-		return 1
+		return 1, ""
 	}
-	best := 0
-	for _, s := range matches {
-		if s.Version > best {
-			best = s.Version
+	var first, latest *patchwork.Series
+	for i := range matches {
+		if first == nil || matches[i].Version < first.Version {
+			first = &matches[i]
+		}
+		if latest == nil || matches[i].Version > latest.Version {
+			latest = &matches[i]
 		}
 	}
-	return best + 1
+	// always reply to v1's cover letter
+	replyTo := ""
+	if first.CoverLetter != nil {
+		replyTo = first.CoverLetter.MsgID
+	} else if len(first.Patches) > 0 {
+		replyTo = first.Patches[0].MsgID
+	}
+	return latest.Version + 1, replyTo
 }
 
 const PRHeader = "X-PWForge-PR"
-
-func (g *ForgeToML) sendMbox(mbox []byte, prRef string) error {
-	emails := splitMbox(mbox)
-	for _, email := range emails {
-		email = injectHeader(email, PRHeader, prRef)
-		if err := g.sendRawEmail(email); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func injectHeader(email []byte, key, value string) []byte {
-	header := fmt.Sprintf("%s: %s\n", key, value)
-	// insert after the first line (the "From " mbox separator)
-	idx := bytes.IndexByte(email, '\n')
-	if idx < 0 {
-		return email
-	}
-	var result []byte
-	result = append(result, email[:idx+1]...)
-	result = append(result, []byte(header)...)
-	result = append(result, email[idx+1:]...)
-	return result
-}
-
-func splitMbox(mbox []byte) [][]byte {
-	var emails [][]byte
-	sep := []byte("\nFrom ")
-	parts := bytes.Split(mbox, sep)
-	for i, part := range parts {
-		if len(part) == 0 {
-			continue
-		}
-		if i > 0 {
-			part = append([]byte("From "), part...)
-		}
-		emails = append(emails, part)
-	}
-	return emails
-}
-
-func (g *ForgeToML) sendRawEmail(email []byte) error {
-	// extract From header for envelope sender
-	from := g.smtp.From
-	for _, line := range strings.SplitN(string(email), "\n", 20) {
-		if strings.HasPrefix(line, "From: ") {
-			from = strings.TrimPrefix(line, "From: ")
-			break
-		}
-	}
-
-	addr := fmt.Sprintf("%s:%d", g.smtp.Host, g.smtp.Port)
-
-	var auth smtp.Auth
-	if g.smtp.Username != "" {
-		auth = smtp.PlainAuth("", g.smtp.Username, g.smtp.Password, g.smtp.Host)
-	}
-
-	log.Printf("sending patch email: %s -> %s", from, g.smtp.To)
-
-	return smtp.SendMail(addr, auth, g.smtp.From, []string{g.smtp.To}, email)
-}
 
 var htmlCommentRe = regexp.MustCompile(`(?s)<!--.*?-->`)
 

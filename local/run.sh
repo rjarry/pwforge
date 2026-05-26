@@ -171,6 +171,7 @@ $([ -n "$GH_UPSTREAM_REPO" ] && echo "fork-repo = $GITHUB_REPO")
 [smtp]
 host = localhost
 port = 1587
+encryption = none
 from = bridge@pwforge.test
 to = test-project@lists.pwforge.test
 

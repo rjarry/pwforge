@@ -29,7 +29,7 @@ func NewMLToForge(
 	return &MLToForge{
 		pw:           pw,
 		forge:        forge,
-		git:          NewGitMirror(&conf.Git, forge),
+		git:          NewGitMirror(&conf.Git, &conf.SMTP, forge),
 		branchPrefix: conf.Git.BranchPrefix,
 	}
 }
