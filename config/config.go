@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"net/mail"
 
 	"gopkg.in/ini.v1"
 )
@@ -39,20 +40,30 @@ type GitHubConfig struct {
 }
 
 type SMTPConfig struct {
-	Host     string `ini:"host"`
-	Port     int    `ini:"port"`
-	Username string `ini:"username"`
-	Password string `ini:"password"`
-	From     string `ini:"from"`
-	To       string `ini:"to"`
+	Host       string `ini:"host"`
+	Port       int    `ini:"port"`
+	Encryption string `ini:"encryption"`
+	Username   string `ini:"username"`
+	Password   string `ini:"password"`
+	From       string `ini:"from"`
+	To         string `ini:"to"`
+}
+
+func (s *SMTPConfig) ParseFrom() (name, email string) {
+	addr, err := mail.ParseAddress(s.From)
+	if err != nil {
+		return "Pwforge", s.From
+	}
+	if addr.Name == "" {
+		addr.Name = "Pwforge"
+	}
+	return addr.Name, addr.Address
 }
 
 type GitConfig struct {
-	MirrorPath     string `ini:"mirror-path"`
-	BranchPrefix   string `ini:"branch-prefix"`
-	SubjectPrefix  string `ini:"subject-prefix"`
-	CommitterName  string `ini:"committer-name"`
-	CommitterEmail string `ini:"committer-email"`
+	MirrorPath    string `ini:"mirror-path"`
+	BranchPrefix  string `ini:"branch-prefix"`
+	SubjectPrefix string `ini:"subject-prefix"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -61,14 +72,13 @@ func LoadConfig(path string) (*Config, error) {
 		Forge:  "github",
 		GitHub: GitHubConfig{},
 		SMTP: SMTPConfig{
-			Port: 587,
+			Port:       587,
+			Encryption: "tls",
 		},
 		Git: GitConfig{
-			MirrorPath:     "/var/cache/pwforge/repo.git",
-			BranchPrefix:   "pwforge",
-			SubjectPrefix:  "PATCH",
-			CommitterName:  "pwforge",
-			CommitterEmail: "pwforge@local",
+			MirrorPath:    "/var/cache/pwforge/repo.git",
+			BranchPrefix:  "pwforge",
+			SubjectPrefix: "PATCH",
 		},
 	}
 
