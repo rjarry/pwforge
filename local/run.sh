@@ -69,7 +69,7 @@ done
 
 # -- persistent data directory ------------------------------------------------
 
-mkdir -p "$BUILDDIR"/{patchwork-db,maildir/INBOX/{new,cur,tmp},mirror}
+mkdir -p $BUILDDIR/patchwork-db $BUILDDIR/maildir/INBOX/{new,cur,tmp}
 
 # -- github repo setup --------------------------------------------------------
 
@@ -84,7 +84,7 @@ if ! gh repo view "$GH_FULL_REPO" >/dev/null 2>&1; then
 			--fork-name "$GITHUB_REPO" --clone=false
 	else
 		echo "creating github repo $GH_FULL_REPO..."
-		gh repo create "$GITHUB_REPO" --add-readme
+		gh repo create "$GITHUB_REPO" --add-readme --public
 	fi
 	sleep 2
 fi
@@ -93,7 +93,8 @@ GH_TOKEN=$(gh auth token)
 # clone the github repo if not already present
 if [ ! -d "$BUILDDIR/workdir/.git" ]; then
 	rm -rf "$BUILDDIR/workdir"
-	gh repo clone "$GH_FULL_REPO" "$BUILDDIR/workdir"
+	GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+		git clone "https://github.com/$GH_FULL_REPO.git" "$BUILDDIR/workdir"
 	git -C "$BUILDDIR/workdir" config user.email developer@pwforge.test
 	git -C "$BUILDDIR/workdir" config user.name Developer
 fi
@@ -218,9 +219,9 @@ tmux new-window -d -n postfix \
 		--name pwforge-postfix \
 		-p 1587:587 \
 		-v $BUILDDIR/patchwork-db:/data:Z \
-		-v $BUILDDIR/maildir:/root/Maildir \
+		-v $BUILDDIR/maildir:/root/Maildir:Z \
 		localhost/pwforge-patchwork postfix -v start-fg; \
-	 read -rp 'patchwork exited, press enter to close'"
+	 read -rp 'postfix exited, press enter to close'"
 
 cat >$BUILDDIR/watch_pwforge.sh <<EOF
 #!/bin/sh
