@@ -4,9 +4,11 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/rjarry/pwforge/config"
 	"github.com/rjarry/pwforge/models"
@@ -77,16 +79,62 @@ func (s *Server) handlePatchworkEvent(event *patchwork.Event) {
 	switch event.Category {
 	case "series-completed":
 		seriesID := extractSeriesID(event)
-		if seriesID > 0 {
-			if err := s.mlToForge.HandleSeriesCompleted(seriesID); err != nil {
-				log.Printf("series-completed error: %v", err)
-			}
+		if seriesID <= 0 {
+			break
+		}
+		if s.linkForgeOriginatedSeries(seriesID) {
+			break
+		}
+		if err := s.mlToForge.HandleSeriesCompleted(seriesID); err != nil {
+			log.Printf("series-completed error: %v", err)
 		}
 	case "patch-comment-created", "cover-comment-created":
 		if err := s.mlToForge.HandleCommentCreated(event); err != nil {
 			log.Printf("comment-created error: %v", err)
 		}
 	}
+}
+
+func (s *Server) linkForgeOriginatedSeries(seriesID int) bool {
+	series, err := s.pw.GetSeries(seriesID)
+	if err != nil {
+		return false
+	}
+	// already linked
+	if _, ok := series.Metadata[s.forge.MetaKeyPR()].(string); ok {
+		return true
+	}
+	// check the first patch for the X-PWForge-PR header
+	if len(series.Patches) == 0 {
+		return false
+	}
+	patch, err := s.pw.GetPatch(series.Patches[0].ID)
+	if err != nil {
+		return false
+	}
+	prRef, ok := patch.Headers[sync.PRHeader].(string)
+	if !ok || prRef == "" {
+		return false
+	}
+	log.Printf("series %d originated from forge PR %s, linking", seriesID, prRef)
+
+	prNumber, err := sync.ParsePRNumber(prRef)
+	if err != nil {
+		log.Printf("invalid PR ref in header: %v", err)
+		return false
+	}
+
+	metadata := map[string]interface{}{
+		s.forge.MetaKeyPR(): prRef,
+		s.forge.MetaKeyBranch(): fmt.Sprintf("%s/%x/%s",
+			s.conf.Git.BranchPrefix, seriesID, "forge-pr"),
+	}
+	if err := s.pw.UpdateSeriesMetadata(seriesID, metadata); err != nil {
+		log.Printf("failed to link series %d to PR: %v", seriesID, err)
+	}
+
+	_ = prNumber
+	return true
 }
 
 func extractSeriesID(event *patchwork.Event) int {
@@ -117,10 +165,30 @@ func (s *Server) handleForge(w http.ResponseWriter, r *http.Request) {
 	log.Printf("forge event: %s (PR #%d by %s)",
 		event.Type, event.PRNumber, event.Author.Login)
 
+	w.WriteHeader(http.StatusOK)
+
+	go s.handleForgeEvent(event)
+}
+
+func (s *Server) handleForgeEvent(event *models.ForgeEvent) {
+	if event.Type == "pull_request" {
+		// skip PRs created by pwforge itself
+		if strings.HasPrefix(event.PRHeadBranch, s.conf.Git.BranchPrefix+"/") {
+			log.Printf("ignoring PR #%d from pwforge branch %s",
+				event.PRNumber, event.PRHeadBranch)
+			return
+		}
+		if err := s.forgeToML.HandlePullRequest(
+			event, s.mlToForge.Git(), s.forge,
+		); err != nil {
+			log.Printf("pull_request error: %v", err)
+		}
+		return
+	}
+
 	series := s.findSeriesByPR(event.PRNumber)
 	if series == nil {
 		log.Printf("no patchwork series found for PR #%d", event.PRNumber)
-		w.WriteHeader(http.StatusOK)
 		return
 	}
 
@@ -138,8 +206,6 @@ func (s *Server) handleForge(w http.ResponseWriter, r *http.Request) {
 			log.Printf("check error: %v", err)
 		}
 	}
-
-	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) findSeriesByPR(prNumber int) *patchwork.Series {

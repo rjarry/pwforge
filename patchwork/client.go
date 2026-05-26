@@ -51,7 +51,11 @@ func (c *Client) doJSON(method, path string, body io.Reader, result interface{})
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// drain remaining body to allow connection reuse
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode >= 400 {
 		data, _ := io.ReadAll(resp.Body)
@@ -63,8 +67,7 @@ func (c *Client) doJSON(method, path string, body io.Reader, result interface{})
 			return err
 		}
 	}
-	// drain remaining body to allow connection reuse
-	io.Copy(io.Discard, resp.Body)
+
 	return nil
 }
 

@@ -109,6 +109,10 @@ func (g *GitHub) PRRef(prNumber int) string {
 		g.owner, g.repo, prNumber)
 }
 
+func (g *GitHub) PRRefSpec(prNumber int) string {
+	return fmt.Sprintf("pull/%d/head", prNumber)
+}
+
 func (g *GitHub) CreatePR(title, body, head, base string) (int, error) {
 	pr, _, err := g.client.PullRequests.Create(
 		context.Background(),
@@ -155,6 +159,8 @@ func (g *GitHub) ParseWebhook(r *http.Request) (*models.ForgeEvent, error) {
 		return g.parseReviewComment(body)
 	case "check_run":
 		return g.parseCheckRun(body)
+	case "pull_request":
+		return g.parsePullRequest(body)
 	default:
 		return nil, nil
 	}
@@ -238,6 +244,35 @@ func (g *GitHub) parseCheckRun(body []byte) (*models.ForgeEvent, error) {
 		CheckStatus: run.GetConclusion(),
 		CheckURL:    run.GetHTMLURL(),
 		CheckDesc:   desc,
+	}, nil
+}
+
+func (g *GitHub) parsePullRequest(body []byte) (*models.ForgeEvent, error) {
+	var payload gh.PullRequestEvent
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("parse pull_request: %w", err)
+	}
+	action := payload.GetAction()
+	if action != "opened" && action != "synchronize" {
+		return nil, nil
+	}
+	pr := payload.GetPullRequest()
+	user := pr.GetUser()
+	return &models.ForgeEvent{
+		Type:     "pull_request",
+		PRNumber: pr.GetNumber(),
+		Author: models.ForgeUser{
+			Login: user.GetLogin(),
+			Name:  user.GetName(),
+			Email: user.GetEmail(),
+		},
+		PRTitle:      pr.GetTitle(),
+		PRBody:       pr.GetBody(),
+		PRHead:       fmt.Sprintf("pull/%d/head", pr.GetNumber()),
+		PRBase:       fmt.Sprintf("pull/%d/base", pr.GetNumber()),
+		PRHeadBranch: pr.GetHead().GetRef(),
+		PRAction:     action,
+		PRBefore:     payload.GetBefore(),
 	}, nil
 }
 

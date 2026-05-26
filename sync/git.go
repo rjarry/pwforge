@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/rjarry/pwforge/config"
@@ -69,6 +70,56 @@ func (m *GitMirror) Fetch() error {
 	})
 }
 
+func (m *GitMirror) FetchRef(ref string) error {
+	return m.withCredentials(func() error {
+		return m.git("-C", m.conf.MirrorPath, "fetch", "origin", ref)
+	})
+}
+
+func (m *GitMirror) FormatPatch(
+	workdir, base, title, body, previousRef string, version int,
+) ([]byte, error) {
+	args := []string{
+		"-C", workdir, "format-patch", "--stdout",
+		"--subject-prefix", m.conf.SubjectPrefix,
+	}
+	if version > 1 {
+		args = append(args, fmt.Sprintf("-v%d", version))
+	}
+
+	// use a cover letter when there are multiple commits
+	nCommits, _ := m.commitCount(workdir, base)
+	if nCommits > 1 {
+		descFile := filepath.Join(workdir, ".cover-description")
+		desc := title + "\n\n" + body
+		_ = os.WriteFile(descFile, []byte(desc), 0o644)
+		args = append(args,
+			"--cover-letter",
+			"--cover-from-description=subject",
+			"--description-file="+descFile)
+	}
+
+	if previousRef != "" {
+		args = append(args, "--range-diff="+base+".."+previousRef)
+	}
+
+	args = append(args, base+"..HEAD")
+
+	return m.gitOutput(args...)
+}
+
+func (m *GitMirror) commitCount(workdir, base string) (int, error) {
+	out, err := m.gitOutput("-C", workdir, "rev-list", "--count", base+"..HEAD")
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 func (m *GitMirror) AddWorktree(baseBranch, workdir string) error {
 	return m.git("-C", m.conf.MirrorPath, "worktree", "add", "-fd", "--checkout",
 		workdir, baseBranch)
@@ -94,9 +145,8 @@ func (m *GitMirror) Push(workdir, branch string) error {
 	})
 }
 
-func (m *GitMirror) git(args ...string) error {
-	line := "git " + strings.Join(args, " ")
-	log.Printf("+ %s", line)
+func (m *GitMirror) gitCmd(args ...string) *exec.Cmd {
+	log.Printf("+ git %s", strings.Join(args, " "))
 	cmd := exec.Command("git", args...)
 	cmd.Env = append(os.Environ(),
 		"GIT_CONFIG_GLOBAL=/dev/null",
@@ -105,10 +155,24 @@ func (m *GitMirror) git(args ...string) error {
 		"GIT_COMMITTER_NAME="+m.conf.CommitterName,
 		"GIT_COMMITTER_EMAIL="+m.conf.CommitterEmail,
 	)
+	return cmd
+}
+
+func (m *GitMirror) git(args ...string) error {
+	cmd := m.gitCmd(args...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s: %w", line, err)
+		return fmt.Errorf("%s: %w", strings.Join(cmd.Args, " "), err)
 	}
 	return nil
+}
+
+func (m *GitMirror) gitOutput(args ...string) ([]byte, error) {
+	cmd := m.gitCmd(args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", strings.Join(cmd.Args, " "), err)
+	}
+	return out, nil
 }

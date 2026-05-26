@@ -34,6 +34,8 @@ func NewMLToForge(
 	}
 }
 
+func (m *MLToForge) Git() *GitMirror { return m.git }
+
 func (m *MLToForge) HandleSeriesCompleted(seriesID int) error {
 	series, err := m.pw.GetSeries(seriesID)
 	if err != nil {
@@ -86,7 +88,7 @@ func (m *MLToForge) updateExistingPR(series, prev *patchwork.Series) error {
 	prRef := prev.Metadata[m.forge.MetaKeyPR()].(string)
 	branch := prev.Metadata[m.forge.MetaKeyBranch()].(string)
 
-	prNumber, err := parsePRNumber(prRef)
+	prNumber, err := ParsePRNumber(prRef)
 	if err != nil {
 		return err
 	}
@@ -399,7 +401,7 @@ func (m *MLToForge) HandleCommentCreated(event *patchwork.Event) error {
 		return nil
 	}
 
-	prNumber, err := parsePRNumber(prRef)
+	prNumber, err := ParsePRNumber(prRef)
 	if err != nil {
 		return err
 	}
@@ -413,7 +415,7 @@ func (m *MLToForge) HandleCommentCreated(event *patchwork.Event) error {
 	return m.forge.PostComment(prNumber, body)
 }
 
-func parsePRNumber(ref string) (int, error) {
+func ParsePRNumber(ref string) (int, error) {
 	i := strings.LastIndex(ref, "/")
 	if i < 0 {
 		return 0, fmt.Errorf("invalid PR ref: %s", ref)

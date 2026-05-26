@@ -13,7 +13,7 @@ import (
 const CommentMarker = "<!-- pwforge -->"
 
 type ForgeEvent struct {
-	Type     string // "issue_comment", "review_comment", "check"
+	Type     string // "issue_comment", "review_comment", "check", "pull_request"
 	PRNumber int
 	Author   ForgeUser
 	Body     string
@@ -24,6 +24,14 @@ type ForgeEvent struct {
 	CheckStatus string
 	CheckURL    string
 	CheckDesc   string
+	// pull_request event fields
+	PRTitle      string
+	PRBody       string
+	PRHead       string // refspec: pull/<n>/head
+	PRBase       string // refspec: pull/<n>/base
+	PRHeadBranch string // branch name (for loop detection)
+	PRAction     string
+	PRBefore     string // previous head SHA (for synchronize)
 }
 
 type ForgeUser struct {
@@ -39,6 +47,7 @@ type Forge interface {
 	MetaKeyPR() string
 	MetaKeyBranch() string
 	PRRef(prNumber int) string
+	PRRefSpec(prNumber int) string
 	CreatePR(title, body, head, base string) (int, error)
 	PostComment(prNumber int, body string) error
 	ParseWebhook(r *http.Request) (*ForgeEvent, error)
