@@ -67,7 +67,7 @@ REVISION_RANGE ?= origin/main..
 
 .PHONY: check-commits
 check-commits:
-	$Q ./check-commits $(REVISION_RANGE)
+	$Q devtools/check-patches $(REVISION_RANGE)
 
 .PHONY: tag-release
 tag-release:

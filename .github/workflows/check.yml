@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Robin Jarry
+---
+name: Check
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: make
+
+  lint:
+    runs-on: ubuntu-24.04
+    container: fedora:latest
+    steps:
+      - run: dnf install -y make git codespell
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      - run: git config --global --add safe.directory $PWD
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: git rebase -x "make lint" "HEAD~${{ github.event.pull_request.commits }}"
+        if: ${{ github.event.pull_request.commits }}
+      - run: make lint
+        if: ${{ ! github.event.pull_request.commits }}
+
+  commits:
+    runs-on: ubuntu-24.04
+    if: ${{ github.event.pull_request.commits }}
+    container: fedora:latest
+    env:
+      REVISION_RANGE: "HEAD~${{ github.event.pull_request.commits }}.."
+    steps:
+      - run: dnf install -y make git codespell curl jq
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      - run: git config --global --add safe.directory $PWD
+      - run: make check-commits
