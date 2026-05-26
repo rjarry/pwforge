@@ -47,6 +47,7 @@ type SMTPConfig struct {
 
 type GitConfig struct {
 	MirrorPath     string `ini:"mirror-path"`
+	BranchPrefix   string `ini:"branch-prefix"`
 	CommitterName  string `ini:"committer-name"`
 	CommitterEmail string `ini:"committer-email"`
 }
@@ -61,6 +62,7 @@ func LoadConfig(path string) (*Config, error) {
 		},
 		Git: GitConfig{
 			MirrorPath:     "/var/cache/pwforge/repo.git",
+			BranchPrefix:   "pwforge",
 			CommitterName:  "pwforge",
 			CommitterEmail: "pwforge@local",
 		},

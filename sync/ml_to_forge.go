@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -16,18 +17,20 @@ import (
 )
 
 type MLToForge struct {
-	pw    *patchwork.Client
-	forge models.Forge
-	git   *GitMirror
+	pw           *patchwork.Client
+	forge        models.Forge
+	git          *GitMirror
+	branchPrefix string
 }
 
 func NewMLToForge(
 	pw *patchwork.Client, forge models.Forge, conf *config.Config,
 ) *MLToForge {
 	return &MLToForge{
-		pw:    pw,
-		forge: forge,
-		git:   NewGitMirror(&conf.Git, forge),
+		pw:           pw,
+		forge:        forge,
+		git:          NewGitMirror(&conf.Git, forge),
+		branchPrefix: conf.Git.BranchPrefix,
 	}
 }
 
@@ -126,7 +129,7 @@ func (m *MLToForge) createNewPR(series *patchwork.Series) error {
 		return fmt.Errorf("base branch: %w", err)
 	}
 
-	branch := fmt.Sprintf("pw/series/%d/v%d", series.ID, series.Version)
+	branch := m.branchName(series)
 
 	if err := m.applyAndPush(series, branch, baseBranch); err != nil {
 		return fmt.Errorf("apply and push series %d: %w", series.ID, err)
@@ -170,6 +173,23 @@ func (m *MLToForge) buildUpdateComment(series *patchwork.Series) string {
 	b.WriteString(models.CommentMarker)
 
 	return b.String()
+}
+
+var nonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
+
+func (m *MLToForge) branchName(series *patchwork.Series) string {
+	name := series.Name
+	if name == "" && len(series.Patches) > 0 {
+		name = series.Patches[0].Name
+	}
+	slug := strings.ToLower(name)
+	slug = nonAlnum.ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if len(slug) > 50 {
+		slug = slug[:50]
+		slug = strings.TrimRight(slug, "-")
+	}
+	return fmt.Sprintf("%s/%x/%s", m.branchPrefix, series.ID, slug)
 }
 
 func parseIDFromURL(url string) (int, error) {
