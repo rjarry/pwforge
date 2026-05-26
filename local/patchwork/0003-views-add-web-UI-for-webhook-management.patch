@@ -1,7 +1,7 @@
-From 31d00ec1b43d63f906d06083ed07e9d930b2a8d3 Mon Sep 17 00:00:00 2001
+From ecbf75b4a00382f81b3da4a7da6dcce6d33139cf Mon Sep 17 00:00:00 2001
 From: Robin Jarry <robin@jarry.cc>
 Date: Tue, 26 May 2026 14:01:57 +0200
-Subject: [PATCH 5/6] views: add web UI for webhook management
+Subject: [PATCH 3/6] views: add web UI for webhook management
 
 Add CRUD views for webhooks accessible to project maintainers.
 The project detail page shows a link to manage webhooks when the

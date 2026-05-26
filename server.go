@@ -145,17 +145,14 @@ func (s *Server) handleForge(w http.ResponseWriter, r *http.Request) {
 func (s *Server) findSeriesByPR(prNumber int) *patchwork.Series {
 	prRef := s.forge.PRRef(prNumber)
 
-	allSeries, err := s.pw.ListSeries(s.conf.Patchwork.Project)
+	matches, err := s.pw.FindSeriesByMetadata(
+		s.conf.Patchwork.Project, s.forge.MetaKeyPR(), prRef)
 	if err != nil {
-		log.Printf("list series: %v", err)
+		log.Printf("find series by PR: %v", err)
 		return nil
 	}
-	for i := range allSeries {
-		if ref, ok := allSeries[i].Metadata[s.forge.MetaKeyPR()].(string); ok {
-			if ref == prRef {
-				return &allSeries[i]
-			}
-		}
+	if len(matches) == 0 {
+		return nil
 	}
-	return nil
+	return &matches[0]
 }

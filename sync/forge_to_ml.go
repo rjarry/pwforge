@@ -92,12 +92,13 @@ func (g *ForgeToML) HandleCheckEvent(
 
 func (g *ForgeToML) replyToMsgID(series *patchwork.Series, filePath string) string {
 	if filePath != "" {
+		marker := "diff --git a/" + filePath + " b/" + filePath
 		for _, ps := range series.Patches {
 			patch, err := g.pw.GetPatch(ps.ID)
 			if err != nil {
 				continue
 			}
-			if strings.Contains(patch.Diff, filePath) {
+			if strings.Contains(patch.Diff, marker) {
 				return patch.MsgID
 			}
 		}

@@ -1,0 +1,351 @@
+From 6fa6bd17a5bc1f9257ffea948a5fe214a5150b17 Mon Sep 17 00:00:00 2001
+From: Robin Jarry <robin@jarry.cc>
+Date: Sun, 24 May 2026 19:09:59 +0200
+Subject: [PATCH 4/6] api: add metadata support for series
+
+Add a SeriesMetadata model to store arbitrary key-value metadata on
+series for external integrations (e.g. linking to a GitHub PR or a CI
+job). Each entry is a separate row with a unique key per series rather
+than a JSON blob, making it easier to query and index individual keys.
+
+Both key and value columns are indexed. The API supports filtering
+series by metadata via ?metadata_key=foo&metadata_value=bar query
+parameters, either independently or combined.
+
+The REST API presents metadata as a flat dict for convenience.
+Maintainers can update metadata via PATCH with a JSON object. Setting a
+key to null deletes it. The API contract is part of version 1.5.
+
+Signed-off-by: Robin Jarry <rjarry@redhat.com>
+---
+ patchwork/admin.py                           |  9 ++++
+ patchwork/api/filters.py                     |  8 ++++
+ patchwork/api/series.py                      | 48 ++++++++++++++++++--
+ patchwork/migrations/0050_series_metadata.py | 44 ++++++++++++++++++
+ patchwork/models.py                          | 27 +++++++++++
+ patchwork/tests/api/test_series.py           | 40 +++++++++++++---
+ 6 files changed, 165 insertions(+), 11 deletions(-)
+ create mode 100644 patchwork/migrations/0050_series_metadata.py
+
+diff --git a/patchwork/admin.py b/patchwork/admin.py
+index d1c389a17b99..a26487850936 100644
+--- a/patchwork/admin.py
++++ b/patchwork/admin.py
+@@ -19,6 +19,7 @@ from patchwork.models import PatchRelation
+ from patchwork.models import Person
+ from patchwork.models import Project
+ from patchwork.models import Series
++from patchwork.models import SeriesMetadata
+ from patchwork.models import SeriesReference
+ from patchwork.models import State
+ from patchwork.models import Tag
+@@ -181,6 +182,14 @@ class SeriesReferenceAdmin(admin.ModelAdmin):
+ admin.site.register(SeriesReference, SeriesReferenceAdmin)
+ 
+ 
++class SeriesMetadataAdmin(admin.ModelAdmin):
++    model = SeriesMetadata
++    list_display = ('series', 'key', 'value')
++
++
++admin.site.register(SeriesMetadata, SeriesMetadataAdmin)
++
++
+ class CheckAdmin(admin.ModelAdmin):
+     list_display = (
+         'patch',
+diff --git a/patchwork/api/filters.py b/patchwork/api/filters.py
+index e332c5316c2e..7a59073f23c2 100644
+--- a/patchwork/api/filters.py
++++ b/patchwork/api/filters.py
+@@ -165,6 +165,14 @@ class TimestampMixin(BaseFilterSet):
+ class SeriesFilterSet(TimestampMixin, BaseFilterSet):
+     submitter = PersonFilter(queryset=Person.objects.all(), distinct=False)
+     project = ProjectFilter(queryset=Project.objects.all(), distinct=False)
++    metadata_key = CharFilter(
++        field_name='metadata_entry__key',
++        label='Metadata key',
++    )
++    metadata_value = CharFilter(
++        field_name='metadata_entry__value',
++        label='Metadata value',
++    )
+ 
+     class Meta:
+         model = Series
+diff --git a/patchwork/api/series.py b/patchwork/api/series.py
+index c9f5f54bdbfd..e58d276d8146 100644
+--- a/patchwork/api/series.py
++++ b/patchwork/api/series.py
+@@ -4,7 +4,7 @@
+ # SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ from rest_framework.generics import ListAPIView
+-from rest_framework.generics import RetrieveAPIView
++from rest_framework.generics import RetrieveUpdateAPIView
+ from rest_framework.serializers import (
+     SerializerMethodField,
+     HyperlinkedRelatedField,
+@@ -18,6 +18,7 @@ from patchwork.api.embedded import PatchSerializer
+ from patchwork.api.embedded import PersonSerializer
+ from patchwork.api.embedded import ProjectSerializer
+ from patchwork.models import Series
++from patchwork.models import SeriesMetadata
+ 
+ 
+ class SeriesSerializer(BaseHyperlinkedModelSerializer):
+@@ -33,6 +34,7 @@ class SeriesSerializer(BaseHyperlinkedModelSerializer):
+     dependents = HyperlinkedRelatedField(
+         read_only=True, view_name='api-series-detail', many=True
+     )
++    metadata = SerializerMethodField()
+ 
+     def get_web_url(self, instance):
+         request = self.context.get('request')
+@@ -42,15 +44,39 @@ class SeriesSerializer(BaseHyperlinkedModelSerializer):
+         request = self.context.get('request')
+         return request.build_absolute_uri(instance.get_mbox_url())
+ 
++    def get_metadata(self, instance):
++        return {m.key: m.value for m in instance.metadata.all()}
++
+     def to_representation(self, instance):
+         if not instance.project.show_dependencies:
+             for field in ('dependencies', 'dependents'):
+                 if field in self.fields:
+                     del self.fields[field]
+ 
+-        data = super().to_representation(instance)
++        return super().to_representation(instance)
+ 
+-        return data
++    def to_internal_value(self, data):
++        ret = super().to_internal_value(data)
++        if 'metadata' in data:
++            ret['metadata'] = data['metadata']
++        return ret
++
++    def update(self, instance, validated_data):
++        metadata = validated_data.pop('metadata', None)
++        instance = super().update(instance, validated_data)
++        if metadata is not None:
++            for key, value in metadata.items():
++                if value is None:
++                    SeriesMetadata.objects.filter(
++                        series=instance, key=key
++                    ).delete()
++                else:
++                    SeriesMetadata.objects.update_or_create(
++                        series=instance,
++                        key=key,
++                        defaults={'value': str(value)},
++                    )
++        return instance
+ 
+     class Meta:
+         model = Series
+@@ -71,6 +97,7 @@ class SeriesSerializer(BaseHyperlinkedModelSerializer):
+             'patches',
+             'dependencies',
+             'dependents',
++            'metadata',
+         )
+         read_only_fields = (
+             'date',
+@@ -87,6 +114,7 @@ class SeriesSerializer(BaseHyperlinkedModelSerializer):
+         versioned_fields = {
+             '1.1': ('web_url',),
+             '1.4': ('dependencies', 'dependents'),
++            '1.5': ('metadata',),
+         }
+         extra_kwargs = {
+             'url': {'view_name': 'api-series-detail'},
+@@ -105,6 +133,7 @@ class SeriesMixin(object):
+                 'cover_letter__project',
+                 'dependencies',
+                 'dependents',
++                'metadata',
+             )
+             .select_related('submitter', 'project')
+         )
+@@ -119,7 +148,16 @@ class SeriesList(SeriesMixin, ListAPIView):
+     ordering = 'id'
+ 
+ 
+-class SeriesDetail(SeriesMixin, RetrieveAPIView):
+-    """Show a series."""
++class SeriesDetail(SeriesMixin, RetrieveUpdateAPIView):
++    """
++    get:
++    Show a series.
++
++    patch:
++    Update a series.
++
++    put:
++    Update a series.
++    """
+ 
+     pass
+diff --git a/patchwork/migrations/0050_series_metadata.py b/patchwork/migrations/0050_series_metadata.py
+new file mode 100644
+index 000000000000..f3fccf10a02f
+--- /dev/null
++++ b/patchwork/migrations/0050_series_metadata.py
+@@ -0,0 +1,44 @@
++from django.db import migrations, models
++import django.db.models.deletion
++
++
++class Migration(migrations.Migration):
++    dependencies = [
++        ('patchwork', '0049_webhook'),
++    ]
++
++    operations = [
++        migrations.AlterModelOptions(
++            name='webhook',
++            options={'ordering': ['id']},
++        ),
++        migrations.CreateModel(
++            name='SeriesMetadata',
++            fields=[
++                (
++                    'id',
++                    models.AutoField(
++                        auto_created=True,
++                        primary_key=True,
++                        serialize=False,
++                        verbose_name='ID',
++                    ),
++                ),
++                ('key', models.CharField(db_index=True, max_length=255)),
++                ('value', models.TextField(db_index=True, max_length=255)),
++                (
++                    'series',
++                    models.ForeignKey(
++                        on_delete=django.db.models.deletion.CASCADE,
++                        related_name='metadata',
++                        related_query_name='metadata_entry',
++                        to='patchwork.series',
++                    ),
++                ),
++            ],
++            options={
++                'unique_together': {('series', 'key')},
++                'ordering': ['key'],
++            },
++        ),
++    ]
+diff --git a/patchwork/models.py b/patchwork/models.py
+index 8ed6a1cea037..37b90a74bf6c 100644
+--- a/patchwork/models.py
++++ b/patchwork/models.py
+@@ -967,6 +967,13 @@ class Series(FilenameMixin, models.Model):
+ 
+         return patch
+ 
++    def is_editable(self, user):
++        if not user.is_authenticated:
++            return False
++        if self.project.is_editable(user):
++            return True
++        return False
++
+     def get_absolute_url(self):
+         # TODO(stephenfin): We really need a proper series view
+         return reverse(
+@@ -1008,6 +1015,26 @@ class SeriesReference(models.Model):
+         unique_together = [('project', 'msgid')]
+ 
+ 
++class SeriesMetadata(models.Model):
++    """A single key-value metadata entry for a series."""
++
++    series = models.ForeignKey(
++        Series,
++        related_name='metadata',
++        related_query_name='metadata_entry',
++        on_delete=models.CASCADE,
++    )
++    key = models.CharField(max_length=255, db_index=True)
++    value = models.TextField(max_length=255, db_index=True)
++
++    def __str__(self):
++        return f'{self.key}={self.value}'
++
++    class Meta:
++        unique_together = [('series', 'key')]
++        ordering = ['key']
++
++
+ class Bundle(models.Model):
+     owner = models.ForeignKey(
+         User,
+diff --git a/patchwork/tests/api/test_series.py b/patchwork/tests/api/test_series.py
+index 24d7d9a6899c..9a92e360c443 100644
+--- a/patchwork/tests/api/test_series.py
++++ b/patchwork/tests/api/test_series.py
+@@ -197,7 +197,7 @@ class TestSeriesAPI(utils.APITestCase):
+             create_cover(series=series_obj)
+             create_patch(series=series_obj)
+ 
+-        with self.assertNumQueries(8):
++        with self.assertNumQueries(9):
+             self.client.get(self.api_url())
+ 
+     @utils.store_samples('series-detail')
+@@ -251,8 +251,8 @@ class TestSeriesAPI(utils.APITestCase):
+         with self.assertRaises(NoReverseMatch):
+             self.client.get(self.api_url('foo'))
+ 
+-    def test_create_update_delete(self):
+-        """Ensure creates, updates and deletes aren't allowed"""
++    def test_create_delete(self):
++        """Ensure creates and deletes aren't allowed."""
+         user = create_maintainer()
+         user.is_superuser = True
+         user.save()
+@@ -263,8 +263,36 @@ class TestSeriesAPI(utils.APITestCase):
+ 
+         series = create_series()
+ 
+-        resp = self.client.patch(self.api_url(series.id), {'name': 'Test'})
+-        self.assertEqual(status.HTTP_405_METHOD_NOT_ALLOWED, resp.status_code)
+-
+         resp = self.client.delete(self.api_url(series.id))
+         self.assertEqual(status.HTTP_405_METHOD_NOT_ALLOWED, resp.status_code)
++
++    def test_update(self):
++        """Ensure maintainers can update series metadata."""
++        project = create_project()
++        user = create_maintainer(project=project)
++        self.client.authenticate(user=user)
++
++        series = create_series(project=project)
++
++        resp = self.client.patch(
++            self.api_url(series.id),
++            {'metadata': {'github': 'owner/repo#42'}},
++            validate_request=False,
++            validate_response=False,
++        )
++        self.assertEqual(status.HTTP_200_OK, resp.status_code)
++        self.assertEqual({'github': 'owner/repo#42'}, resp.data['metadata'])
++
++    def test_update_non_maintainer(self):
++        """Ensure non-maintainers cannot update series."""
++        series = create_series()
++        user = create_user()
++        self.client.authenticate(user=user)
++
++        resp = self.client.patch(
++            self.api_url(series.id),
++            {'metadata': {'test': 'value'}},
++            validate_request=False,
++            validate_response=False,
++        )
++        self.assertEqual(status.HTTP_403_FORBIDDEN, resp.status_code)
+-- 
+2.54.0
+

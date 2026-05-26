@@ -1,4 +1,4 @@
-From 787430de0e21a3c806e01568ffce773f6ce8e608 Mon Sep 17 00:00:00 2001
+From 337cb93e33e12999fca21166089d16dc1a0d9467 Mon Sep 17 00:00:00 2001
 From: Robin Jarry <robin@jarry.cc>
 Date: Tue, 26 May 2026 15:28:19 +0200
 Subject: [PATCH 6/6] series: add respin tracking for patch series versions
@@ -32,20 +32,19 @@ Signed-off-by: Robin Jarry <rjarry@redhat.com>
  patchwork/models.py                           |  34 ++++++
  patchwork/parser.py                           | 112 ++++++++++++++++++
  patchwork/templates/patchwork/submission.html |  15 +++
- patchwork/tests/api/test_series.py            |   2 +-
  patchwork/views/cover.py                      |   3 +
  patchwork/views/patch.py                      |   2 +
- 8 files changed, 213 insertions(+), 3 deletions(-)
+ 7 files changed, 212 insertions(+), 2 deletions(-)
  create mode 100644 patchwork/migrations/0051_series_respin_tracking.py
 
 diff --git a/patchwork/api/series.py b/patchwork/api/series.py
-index 96062da45d24..71f26bcc91c1 100644
+index e58d276d8146..d7cc7513f172 100644
 --- a/patchwork/api/series.py
 +++ b/patchwork/api/series.py
-@@ -33,6 +33,12 @@ class SeriesSerializer(BaseHyperlinkedModelSerializer):
-     dependents = HyperlinkedRelatedField(
+@@ -35,6 +35,12 @@ class SeriesSerializer(BaseHyperlinkedModelSerializer):
          read_only=True, view_name='api-series-detail', many=True
      )
+     metadata = SerializerMethodField()
 +    previous_series = HyperlinkedRelatedField(
 +        read_only=True, view_name='api-series-detail'
 +    )
@@ -55,7 +54,7 @@ index 96062da45d24..71f26bcc91c1 100644
  
      def get_web_url(self, instance):
          request = self.context.get('request')
-@@ -72,6 +78,8 @@ class SeriesSerializer(BaseHyperlinkedModelSerializer):
+@@ -98,6 +104,8 @@ class SeriesSerializer(BaseHyperlinkedModelSerializer):
              'dependencies',
              'dependents',
              'metadata',
@@ -64,7 +63,7 @@ index 96062da45d24..71f26bcc91c1 100644
          )
          read_only_fields = (
              'date',
-@@ -84,11 +92,13 @@ class SeriesSerializer(BaseHyperlinkedModelSerializer):
+@@ -110,11 +118,13 @@ class SeriesSerializer(BaseHyperlinkedModelSerializer):
              'patches',
              'dependencies',
              'dependents',
@@ -79,10 +78,10 @@ index 96062da45d24..71f26bcc91c1 100644
          }
          extra_kwargs = {
              'url': {'view_name': 'api-series-detail'},
-@@ -107,8 +117,9 @@ class SeriesMixin(object):
-                 'cover_letter__project',
+@@ -134,8 +144,9 @@ class SeriesMixin(object):
                  'dependencies',
                  'dependents',
+                 'metadata',
 +                'next_series',
              )
 -            .select_related('submitter', 'project')
@@ -130,7 +129,7 @@ index 000000000000..c9b27c1ed467
 +        ),
 +    ]
 diff --git a/patchwork/models.py b/patchwork/models.py
-index df6e63a25c3a..a74d649c0dae 100644
+index 37b90a74bf6c..1b8a1476d64e 100644
 --- a/patchwork/models.py
 +++ b/patchwork/models.py
 @@ -104,6 +104,11 @@ class Project(models.Model):
@@ -161,7 +160,7 @@ index df6e63a25c3a..a74d649c0dae 100644
      # metadata
      name = models.CharField(
          max_length=255,
-@@ -970,6 +984,26 @@ class Series(FilenameMixin, models.Model):
+@@ -967,6 +981,26 @@ class Series(FilenameMixin, models.Model):
  
          return patch
  
@@ -333,7 +332,7 @@ index c33ada8d7d42..cf56849f97ef 100644
  
      # comments
 diff --git a/patchwork/templates/patchwork/submission.html b/patchwork/templates/patchwork/submission.html
-index 2f3a08a2dce7..b79692399365 100644
+index bcf36c1c6cac..38b0de30873d 100644
 --- a/patchwork/templates/patchwork/submission.html
 +++ b/patchwork/templates/patchwork/submission.html
 @@ -97,6 +97,21 @@
@@ -355,22 +354,9 @@ index 2f3a08a2dce7..b79692399365 100644
 +    </td>
 +  </tr>
 +{% endif %}
- {% if submission.series.metadata %}
+ {% if submission.series.metadata.all %}
    <tr>
      <th>Metadata</th>
-diff --git a/patchwork/tests/api/test_series.py b/patchwork/tests/api/test_series.py
-index 3f3ec192fb6b..9a92e360c443 100644
---- a/patchwork/tests/api/test_series.py
-+++ b/patchwork/tests/api/test_series.py
-@@ -197,7 +197,7 @@ class TestSeriesAPI(utils.APITestCase):
-             create_cover(series=series_obj)
-             create_patch(series=series_obj)
- 
--        with self.assertNumQueries(8):
-+        with self.assertNumQueries(9):
-             self.client.get(self.api_url())
- 
-     @utils.store_samples('series-detail')
 diff --git a/patchwork/views/cover.py b/patchwork/views/cover.py
 index 15013a89e1ce..2a501cfed572 100644
 --- a/patchwork/views/cover.py

@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -122,6 +123,19 @@ func (c *Client) UpdateSeriesMetadata(seriesID int, metadata map[string]interfac
 
 	return c.doJSON("PATCH", fmt.Sprintf("series/%d/", seriesID),
 		bytes.NewReader(body), nil)
+}
+
+func (c *Client) FindSeriesByMetadata(project, key, value string) ([]Series, error) {
+	var series []Series
+	path := fmt.Sprintf("series/?project=%s&metadata_key=%s&metadata_value=%s&order=-id&per_page=1",
+		url.QueryEscape(project),
+		url.QueryEscape(key),
+		url.QueryEscape(value))
+	err := c.doJSON("GET", path, nil, &series)
+	if err != nil {
+		return nil, err
+	}
+	return series, nil
 }
 
 func (c *Client) ListSeries(project string) ([]Series, error) {
