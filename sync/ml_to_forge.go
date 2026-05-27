@@ -346,6 +346,12 @@ func isDiffstatLine(line string) bool {
 }
 
 func (m *MLToForge) HandleCommentCreated(event *patchwork.Event) error {
+	// skip comments originating from pwforge itself
+	if m.isOwnComment(event) {
+		log.Printf("skipping pwforge-originated comment event %d", event.ID)
+		return nil
+	}
+
 	var seriesID int
 	var commentBody string
 	var commentAuthor string
@@ -417,6 +423,26 @@ func (m *MLToForge) HandleCommentCreated(event *patchwork.Event) error {
 	)
 
 	return m.forge.PostComment(prNumber, body)
+}
+
+func (m *MLToForge) isOwnComment(event *patchwork.Event) bool {
+	if p := event.Payload.Patch; p != nil {
+		comments, err := m.pw.GetPatchComments(p.ID)
+		if err != nil || len(comments) == 0 {
+			return false
+		}
+		_, ok := comments[len(comments)-1].Headers[EventHeader]
+		return ok
+	}
+	if c := event.Payload.Cover; c != nil {
+		comments, err := m.pw.GetCoverComments(c.ID)
+		if err != nil || len(comments) == 0 {
+			return false
+		}
+		_, ok := comments[len(comments)-1].Headers[EventHeader]
+		return ok
+	}
+	return false
 }
 
 func ParsePRNumber(ref string) (int, error) {

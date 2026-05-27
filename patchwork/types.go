@@ -129,13 +129,14 @@ type Cover struct {
 }
 
 type Comment struct {
-	ID        int      `json:"id"`
-	URL       string   `json:"url"`
-	MsgID     string   `json:"msgid"`
-	Date      FlexTime `json:"date"`
-	Subject   string   `json:"subject"`
-	Submitter Person   `json:"submitter"`
-	Content   string   `json:"content"`
+	ID        int                    `json:"id"`
+	URL       string                 `json:"url"`
+	MsgID     string                 `json:"msgid"`
+	Date      FlexTime               `json:"date"`
+	Subject   string                 `json:"subject"`
+	Submitter Person                 `json:"submitter"`
+	Content   string                 `json:"content"`
+	Headers   map[string]interface{} `json:"headers"`
 }
 
 type EventPayload struct {
