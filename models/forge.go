@@ -22,7 +22,6 @@ type ForgeEvent struct {
 	// check event fields
 	CheckName   string
 	CheckStatus string
-	CheckURL    string
 	CheckDesc   string
 	// pull_request event fields
 	PRTitle      string
