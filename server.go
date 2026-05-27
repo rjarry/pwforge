@@ -28,12 +28,13 @@ type Server struct {
 func NewServer(conf *config.Config, forge models.Forge) *Server {
 	pw := patchwork.NewClient(conf.Patchwork.URL, conf.Patchwork.Token)
 
+	mlToForge := sync.NewMLToForge(pw, forge, conf)
 	s := &Server{
 		conf:      conf,
 		pw:        pw,
 		forge:     forge,
-		mlToForge: sync.NewMLToForge(pw, forge, conf),
-		forgeToML: sync.NewForgeToML(pw, &conf.SMTP),
+		mlToForge: mlToForge,
+		forgeToML: sync.NewForgeToML(pw, mlToForge.Git()),
 		mux:       http.NewServeMux(),
 	}
 	s.mux.HandleFunc("POST /patchwork", s.handlePatchwork)
@@ -173,8 +174,7 @@ func (s *Server) handleForgeEvent(event *models.ForgeEvent) {
 			return
 		}
 		if err := s.forgeToML.HandlePullRequest(
-			event, s.mlToForge.Git(), s.forge,
-			s.conf.Patchwork.Project,
+			event, s.forge, s.conf.Patchwork.Project,
 		); err != nil {
 			log.Printf("pull_request error: %v", err)
 		}
