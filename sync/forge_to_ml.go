@@ -44,28 +44,38 @@ func (g *ForgeToML) HandleIssueComment(
 		EventHeader+": comment")
 }
 
-func (g *ForgeToML) HandleReviewComment(
+func (g *ForgeToML) HandleReview(
 	event *models.ForgeEvent, series *patchwork.Series,
 ) error {
-	replyTo := g.replyToMsgID(series, event.Path)
+	replyTo := g.replyToMsgID(series, "")
 	if replyTo == "" {
-		return fmt.Errorf("no message-id found for series %d file %s",
-			series.ID, event.Path)
+		return fmt.Errorf("no message-id found for series %d", series.ID)
 	}
 
 	from := g.senderAddress(event.Author)
 	subject := "Re: " + series.Name
 
 	var msgBody strings.Builder
-	if event.DiffHunk != "" {
-		for _, line := range strings.Split(event.DiffHunk, "\n") {
-			msgBody.WriteString("> ")
-			msgBody.WriteString(line)
+	if event.ReviewState != "" {
+		fmt.Fprintf(&msgBody, "Review: %s\n\n", event.ReviewState)
+	}
+	if event.Body != "" {
+		msgBody.WriteString(event.Body)
+		msgBody.WriteString("\n\n")
+	}
+	for _, c := range event.ReviewComments {
+		fmt.Fprintf(&msgBody, "--- %s\n", c.Path)
+		if c.DiffHunk != "" {
+			for _, line := range strings.Split(c.DiffHunk, "\n") {
+				msgBody.WriteString("> ")
+				msgBody.WriteString(line)
+				msgBody.WriteString("\n")
+			}
 			msgBody.WriteString("\n")
 		}
-		msgBody.WriteString("\n")
+		msgBody.WriteString(c.Body)
+		msgBody.WriteString("\n\n")
 	}
-	msgBody.WriteString(event.Body)
 
 	return g.git.SendEmail(from, subject, msgBody.String(), replyTo,
 		EventHeader+": review")

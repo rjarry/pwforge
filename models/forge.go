@@ -13,12 +13,14 @@ import (
 const CommentMarker = "<!-- pwforge -->"
 
 type ForgeEvent struct {
-	Type     string // "issue_comment", "review_comment", "check", "pull_request"
-	PRNumber int
-	Author   ForgeUser
-	Body     string
-	Path     string
-	DiffHunk string
+	Type           string // "issue_comment", "review_comment", "check", "pull_request"
+	PRNumber       int
+	Author         ForgeUser
+	Body           string
+	Path           string
+	DiffHunk       string
+	ReviewState    string // "approved", "changes_requested", "commented"
+	ReviewComments []ReviewComment
 	// check event fields
 	CheckName   string
 	CheckStatus string
@@ -33,6 +35,12 @@ type ForgeEvent struct {
 	PRHeadBranch string // branch name (for loop detection)
 	PRAction     string
 	PRBefore     string // previous head SHA (for synchronize)
+}
+
+type ReviewComment struct {
+	Path     string
+	DiffHunk string
+	Body     string
 }
 
 type CheckRun struct {
