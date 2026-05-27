@@ -235,8 +235,11 @@ func (g *ForgeToML) sendEmail(from, subject, body, inReplyTo string) error {
 	fmt.Fprintf(msg, "To: %s\r\n", g.smtp.To)
 	fmt.Fprintf(msg, "Subject: %s\r\n", subject)
 	if inReplyTo != "" {
-		fmt.Fprintf(msg, "In-Reply-To: <%s>\r\n", inReplyTo)
-		fmt.Fprintf(msg, "References: <%s>\r\n", inReplyTo)
+		if !strings.HasPrefix(inReplyTo, "<") {
+			inReplyTo = "<" + inReplyTo + ">"
+		}
+		fmt.Fprintf(msg, "In-Reply-To: %s\r\n", inReplyTo)
+		fmt.Fprintf(msg, "References: %s\r\n", inReplyTo)
 	}
 	fmt.Fprintf(msg, "Content-Type: text/plain; charset=utf-8\r\n")
 	fmt.Fprintf(msg, "\r\n")
