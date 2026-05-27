@@ -40,7 +40,8 @@ func (g *ForgeToML) HandleIssueComment(
 	from := senderAddress(event.Author, g.smtp.From)
 	subject := "Re: " + series.Name
 
-	return g.sendEmail(from, subject, event.Body, replyTo)
+	return g.sendEmail(from, subject, event.Body, replyTo,
+		EventHeader+": comment")
 }
 
 func (g *ForgeToML) HandleReviewComment(
@@ -66,7 +67,8 @@ func (g *ForgeToML) HandleReviewComment(
 	}
 	msgBody.WriteString(event.Body)
 
-	return g.sendEmail(from, subject, msgBody.String(), replyTo)
+	return g.sendEmail(from, subject, msgBody.String(), replyTo,
+		EventHeader+": review")
 }
 
 func (g *ForgeToML) HandleCheckPending(
@@ -113,7 +115,8 @@ func (g *ForgeToML) HandleCheckEvent(
 		fmt.Fprintf(&body, "\n%s", event.CheckDesc)
 	}
 
-	return g.sendEmail(g.smtp.From, subject, body.String(), replyTo)
+	return g.sendEmail(g.smtp.From, subject, body.String(), replyTo,
+		EventHeader+": check")
 }
 
 func mapCheckState(ghConclusion string) string {
@@ -270,7 +273,9 @@ func senderAddress(user models.ForgeUser, fallbackFrom string) string {
 	}
 }
 
-func (g *ForgeToML) sendEmail(from, subject, body, inReplyTo string) error {
+const EventHeader = "X-PWForge-Event"
+
+func (g *ForgeToML) sendEmail(from, subject, body, inReplyTo string, extraHeaders ...string) error {
 	msg := &strings.Builder{}
 	fmt.Fprintf(msg, "From: %s\r\n", from)
 	fmt.Fprintf(msg, "To: %s\r\n", g.smtp.To)
@@ -281,6 +286,9 @@ func (g *ForgeToML) sendEmail(from, subject, body, inReplyTo string) error {
 		}
 		fmt.Fprintf(msg, "In-Reply-To: %s\r\n", inReplyTo)
 		fmt.Fprintf(msg, "References: %s\r\n", inReplyTo)
+	}
+	for _, h := range extraHeaders {
+		fmt.Fprintf(msg, "%s\r\n", h)
 	}
 	fmt.Fprintf(msg, "Content-Type: text/plain; charset=utf-8\r\n")
 	fmt.Fprintf(msg, "\r\n")
