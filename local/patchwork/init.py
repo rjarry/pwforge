@@ -38,15 +38,32 @@ project, _ = Project.objects.get_or_create(
 
 user.profile.maintainer_projects.add(project)
 
+# pwforge service account (for API access and check reporting)
+bot, _ = User.objects.get_or_create(
+    username="pwforge",
+    defaults={
+        "email": "bridge@pwforge.test",
+    },
+)
+bot.save()
+
+bot.profile.maintainer_projects.add(project)
+
+bot_token, _ = Token.objects.get_or_create(
+    user=bot,
+    defaults={"key": "test-pwforge-token"},
+)
+
 webhook, _ = Webhook.objects.get_or_create(
     project=project,
     url="http://localhost:9090/patchwork",
     secret="",
     events="*",
-    creator=user,
+    creator=bot,
 )
 
-print(f"user: {user.username}")
-print(f"token: {token.key}")
+print(f"admin user: {user.username}")
+print(f"pwforge user: {bot.username}")
+print(f"pwforge token: {bot_token.key}")
 print(f"project: {project.linkname}")
 print(f"webhook: {webhook.url}")

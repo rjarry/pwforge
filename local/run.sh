@@ -156,7 +156,7 @@ forge = github
 
 [patchwork]
 url = http://localhost:8888
-token = test-patchwork-token
+token = test-pwforge-token
 project = test-project
 
 [github]
@@ -268,7 +268,8 @@ echo "============================================"
 echo
 echo "  patchwork:       http://localhost:8888"
 echo "  api:             http://localhost:8888/api/1.5/"
-echo "  api token:       test-patchwork-token"
+echo "  admin:           admin / admin"
+echo "  pwforge token:   test-pwforge-token"
 echo "  smtp:            localhost:1587"
 echo "  list address:    test-project@lists.pwforge.test"
 echo "  github repo:     https://github.com/$GH_FULL_REPO (private)"
