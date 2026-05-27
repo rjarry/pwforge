@@ -37,7 +37,7 @@ func (g *ForgeToML) HandleIssueComment(
 		return fmt.Errorf("no message-id found for series %d", series.ID)
 	}
 
-	from := senderAddress(event.Author, g.smtp.From)
+	from := g.senderAddress(event.Author)
 	subject := "Re: " + series.Name
 
 	return g.sendEmail(from, subject, event.Body, replyTo,
@@ -53,7 +53,7 @@ func (g *ForgeToML) HandleReviewComment(
 			series.ID, event.Path)
 	}
 
-	from := senderAddress(event.Author, g.smtp.From)
+	from := g.senderAddress(event.Author)
 	subject := "Re: " + series.Name
 
 	var msgBody strings.Builder
@@ -218,8 +218,10 @@ func (g *ForgeToML) nextVersionAndReplyTo(
 	return latest.Version + 1, replyTo
 }
 
-const PRHeader = "X-PWForge-PR"
-const BranchHeader = "X-PWForge-Branch"
+const (
+	PRHeader     = "X-PWForge-PR"
+	BranchHeader = "X-PWForge-Branch"
+)
 
 var htmlCommentRe = regexp.MustCompile(`(?s)<!--.*?-->`)
 
@@ -262,14 +264,15 @@ func sanitizePRBody(body string) string {
 	return strings.TrimSpace(strings.Join(result, "\n"))
 }
 
-func senderAddress(user models.ForgeUser, fallbackFrom string) string {
+func (g *ForgeToML) senderAddress(user models.ForgeUser) string {
 	switch {
 	case user.Email != "" && user.Name != "":
 		return fmt.Sprintf("%s <%s>", user.Name, user.Email)
 	case user.Email != "":
 		return fmt.Sprintf("%s <%s>", user.Login, user.Email)
 	default:
-		return fmt.Sprintf("%s (via pwforge) <%s>", user.Login, fallbackFrom)
+		name, email := g.smtp.ParseFrom()
+		return fmt.Sprintf("%s (via %s) <%s>", user.Login, name, email)
 	}
 }
 
