@@ -137,11 +137,17 @@ type Comment struct {
 	Content   string   `json:"content"`
 }
 
+type EventPayload struct {
+	Series *PatchSummary `json:"series"`
+	Patch  *PatchSummary `json:"patch"`
+	Cover  *CoverSummary `json:"cover"`
+}
+
 type Event struct {
-	ID       int                    `json:"id"`
-	Category string                 `json:"category"`
-	Project  Project                `json:"project"`
-	Date     FlexTime               `json:"date"`
-	Actor    *User                  `json:"actor"`
-	Payload  map[string]interface{} `json:"payload"`
+	ID       int          `json:"id"`
+	Category string       `json:"category"`
+	Project  Project      `json:"project"`
+	Date     FlexTime     `json:"date"`
+	Actor    *User        `json:"actor"`
+	Payload  EventPayload `json:"payload"`
 }
