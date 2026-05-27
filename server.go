@@ -4,7 +4,6 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -124,10 +123,13 @@ func (s *Server) linkForgeOriginatedSeries(seriesID int) bool {
 		return false
 	}
 
+	branch, _ := patch.Headers[sync.BranchHeader].(string)
+
 	metadata := map[string]interface{}{
 		s.forge.MetaKeyPR(): prRef,
-		s.forge.MetaKeyBranch(): fmt.Sprintf("%s/%x/%s",
-			s.conf.Git.BranchPrefix, seriesID, "forge-pr"),
+	}
+	if branch != "" {
+		metadata[s.forge.MetaKeyBranch()] = branch
 	}
 	if err := s.pw.UpdateSeriesMetadata(seriesID, metadata); err != nil {
 		log.Printf("failed to link series %d to PR: %v", seriesID, err)
