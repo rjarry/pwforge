@@ -38,7 +38,7 @@ func (g *ForgeToML) HandleIssueComment(
 	}
 
 	from := g.senderAddress(event.Author)
-	subject := "Re: " + series.Name
+	subject := fmt.Sprintf("Re: %s (comment)", series.Name)
 
 	return g.git.SendEmail(from, subject, event.Body, replyTo,
 		EventHeader+": comment")
@@ -53,7 +53,7 @@ func (g *ForgeToML) HandleReview(
 	}
 
 	from := g.senderAddress(event.Author)
-	subject := "Re: " + series.Name
+	subject := fmt.Sprintf("Re: %s (review: %s)", series.Name, event.ReviewState)
 
 	var msgBody strings.Builder
 	if event.ReviewState != "" {
@@ -117,10 +117,10 @@ func (g *ForgeToML) HandleCheckEvent(
 		return fmt.Errorf("no message-id found for series %d", series.ID)
 	}
 
-	subject := "Re: " + series.Name
+	subject := fmt.Sprintf("Re: %s (CI: %s %s)",
+		series.Name, event.CheckName, event.CheckStatus)
 
 	var body strings.Builder
-	fmt.Fprintf(&body, "CI: %s %s\n", event.CheckName, event.CheckStatus)
 	if event.CheckDesc != "" {
 		fmt.Fprintf(&body, "\n%s", event.CheckDesc)
 	}
