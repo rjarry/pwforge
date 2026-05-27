@@ -33,6 +33,7 @@ project, _ = Project.objects.get_or_create(
         "name": "Test Project",
         "listid": "test-project.pwforge.test",
         "listemail": "test-project@pwforge.test",
+        "auto_supersede": True,
     },
 )
 
