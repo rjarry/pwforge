@@ -24,13 +24,13 @@ RUN pip install --no-cache-dir \
 	django-filter~=24.2.0
 
 # apply pwforge patches
-COPY *.patch /tmp/patches/
+COPY patchwork/*.patch /tmp/patches/
 RUN git config user.name Pwforge
 RUN git config user.email pwforge@pwforge.pw
 RUN git am -3 /tmp/patches/*.patch && rm -rf /tmp/patches
 
-COPY init.py /opt/patchwork/init.py
-COPY settings_testbed.py /opt/patchwork/settings_testbed.py
+COPY patchwork/init.py /opt/patchwork/init.py
+COPY patchwork/settings_testbed.py /opt/patchwork/settings_testbed.py
 
 RUN mkdir -p /data && \
 	python manage.py migrate --noinput && \
