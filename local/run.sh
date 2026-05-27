@@ -171,11 +171,12 @@ $([ -n "$GH_UPSTREAM_REPO" ] && echo "fork-repo = $GITHUB_REPO")
 host = localhost
 port = 1587
 encryption = none
-from = bridge@pwforge.test
-to = test-project@lists.pwforge.test
+from = Pwforge Bridge <bridge@pwforge.test>
+to = Test Project <test-project@lists.pwforge.test>
 
 [git]
 mirror-path = $BUILDDIR/mirror
+subject-prefix = PATCH test
 EOF
 
 # -- ensure gh-webhook extension ----------------------------------------------
