@@ -149,7 +149,7 @@ func (c *Client) CreateCheck(patchID int, state, context, targetURL, description
 
 func (c *Client) FindSeriesByMetadata(project, key, value string) ([]Series, error) {
 	var series []Series
-	path := fmt.Sprintf("series/?project=%s&metadata_key=%s&metadata_value=%s&order=-id&per_page=1",
+	path := fmt.Sprintf("series/?project=%s&metadata_key=%s&metadata_value=%s&order=-id",
 		url.QueryEscape(project),
 		url.QueryEscape(key),
 		url.QueryEscape(value))
