@@ -40,7 +40,7 @@ user.profile.maintainer_projects.add(project)
 
 webhook, _ = Webhook.objects.get_or_create(
     project=project,
-    url="http://host.containers.internal:9090/patchwork",
+    url="http://localhost:9090/patchwork",
     secret="",
     events="*",
     creator=user,

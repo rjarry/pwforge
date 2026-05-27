@@ -198,7 +198,7 @@ tmux new-window -d -n patchwork \
 	"podman rm -f pwforge-patchwork 2>/dev/null; \
 	 podman run --rm -it \
 		--name pwforge-patchwork \
-		-p 8888:8888 \
+		--network=host \
 		-v $BUILDDIR/patchwork-db:/data:Z \
 		localhost/pwforge-patchwork; \
 	 read -rp 'patchwork exited, press enter to close'"
@@ -217,7 +217,7 @@ tmux new-window -d -n postfix \
 	"podman rm -f pwforge-postfix 2>/dev/null; \
 	 podman run --rm -it \
 		--name pwforge-postfix \
-		-p 1587:587 \
+		--network=host \
 		-v $BUILDDIR/patchwork-db:/data:Z \
 		-v $BUILDDIR/maildir:/root/Maildir:Z \
 		localhost/pwforge-patchwork postfix -v start-fg; \
