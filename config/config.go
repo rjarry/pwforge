@@ -17,6 +17,12 @@ type Config struct {
 	GitHub    GitHubConfig    `ini:"github"`
 	SMTP      SMTPConfig      `ini:"smtp"`
 	Git       GitConfig       `ini:"git"`
+	Sync      SyncConfig      `ini:"sync"`
+}
+
+type SyncConfig struct {
+	MLToForge bool `ini:"ml-to-forge"`
+	ForgeToML bool `ini:"forge-to-ml"`
 }
 
 type PatchworkConfig struct {
@@ -75,6 +81,10 @@ func LoadConfig(path string) (*Config, error) {
 		SMTP: SMTPConfig{
 			Port:       587,
 			Encryption: "tls",
+		},
+		Sync: SyncConfig{
+			MLToForge: true,
+			ForgeToML: true,
 		},
 		Git: GitConfig{
 			MirrorPath:    "/var/cache/pwforge/repo.git",

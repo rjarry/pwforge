@@ -80,13 +80,18 @@ func (s *Server) handlePatchworkEvent(event *patchwork.Event) {
 		if seriesID <= 0 {
 			break
 		}
+		// always link forge-originated series regardless of sync config
 		if s.linkForgeOriginatedSeries(seriesID) {
+			break
+		}
+		if !s.conf.Sync.MLToForge {
 			break
 		}
 		if err := s.mlToForge.HandleSeriesCompleted(seriesID); err != nil {
 			log.Printf("series-completed error: %v", err)
 		}
 	case "patch-comment-created", "cover-comment-created":
+		// forward ML comments to forge only for series that have a PR
 		if err := s.mlToForge.HandleCommentCreated(event); err != nil {
 			log.Printf("comment-created error: %v", err)
 		}
@@ -167,6 +172,9 @@ func (s *Server) handleForge(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleForgeEvent(event *models.ForgeEvent) {
 	if event.Type == "pull_request" {
+		if !s.conf.Sync.ForgeToML {
+			return
+		}
 		// skip PRs created by pwforge itself
 		if strings.HasPrefix(event.PRHeadBranch, s.conf.Git.BranchPrefix+"/") {
 			log.Printf("ignoring PR #%d from pwforge branch %s",
