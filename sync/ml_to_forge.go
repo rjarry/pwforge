@@ -350,34 +350,31 @@ func (m *MLToForge) HandleCommentCreated(event *patchwork.Event) error {
 	var commentBody string
 	var commentAuthor string
 
-	if patch, ok := event.Payload["patch"].(map[string]interface{}); ok {
-		patchID := int(patch["id"].(float64))
-		fullPatch, err := m.pw.GetPatch(patchID)
+	if p := event.Payload.Patch; p != nil {
+		fullPatch, err := m.pw.GetPatch(p.ID)
 		if err != nil {
-			return fmt.Errorf("get patch %d: %w", patchID, err)
+			return fmt.Errorf("get patch %d: %w", p.ID, err)
 		}
-		if fullPatch.Metadata == nil {
-			return fmt.Errorf("patch %d has no series", patchID)
-		}
-		comments, err := m.pw.GetPatchComments(patchID)
+		comments, err := m.pw.GetPatchComments(p.ID)
 		if err != nil || len(comments) == 0 {
-			return fmt.Errorf("get comments for patch %d: %w", patchID, err)
+			return fmt.Errorf("get comments for patch %d: %w", p.ID, err)
 		}
 		last := comments[len(comments)-1]
 		commentBody = last.Content
 		commentAuthor = fmt.Sprintf("%s <%s>",
 			last.Submitter.Name, last.Submitter.Email)
 
-		if s, ok := fullPatch.Metadata["series"].([]interface{}); ok && len(s) > 0 {
-			if sid, ok := s[0].(map[string]interface{})["id"].(float64); ok {
-				seriesID = int(sid)
+		if fullPatch.Metadata != nil {
+			if s, ok := fullPatch.Metadata["series"].([]interface{}); ok && len(s) > 0 {
+				if sid, ok := s[0].(map[string]interface{})["id"].(float64); ok {
+					seriesID = int(sid)
+				}
 			}
 		}
-	} else if cover, ok := event.Payload["cover"].(map[string]interface{}); ok {
-		coverID := int(cover["id"].(float64))
-		comments, err := m.pw.GetCoverComments(coverID)
+	} else if c := event.Payload.Cover; c != nil {
+		comments, err := m.pw.GetCoverComments(c.ID)
 		if err != nil || len(comments) == 0 {
-			return fmt.Errorf("get comments for cover %d: %w", coverID, err)
+			return fmt.Errorf("get comments for cover %d: %w", c.ID, err)
 		}
 		last := comments[len(comments)-1]
 		commentBody = last.Content

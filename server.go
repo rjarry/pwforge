@@ -53,8 +53,6 @@ func (s *Server) handlePatchwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("patchwork webhook: %s", body)
-
 	sig := r.Header.Get("X-Patchwork-Signature")
 	if !patchwork.VerifySignature(body, sig, s.conf.Patchwork.WebhookSecret) {
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
@@ -68,7 +66,7 @@ func (s *Server) handlePatchwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("patchwork event: %s (id=%d)", event.Category, event.ID)
+	log.Printf("patchwork event: %s %#v", event.Category, event)
 	w.WriteHeader(http.StatusOK)
 
 	go s.handlePatchworkEvent(event)
@@ -140,15 +138,10 @@ func (s *Server) linkForgeOriginatedSeries(seriesID int) bool {
 }
 
 func extractSeriesID(event *patchwork.Event) int {
-	series, ok := event.Payload["series"].(map[string]any)
-	if !ok {
-		return 0
+	if event.Payload.Series != nil {
+		return event.Payload.Series.ID
 	}
-	id, ok := series["id"].(float64)
-	if !ok {
-		return 0
-	}
-	return int(id)
+	return 0
 }
 
 func (s *Server) handleForge(w http.ResponseWriter, r *http.Request) {
@@ -164,8 +157,7 @@ func (s *Server) handleForge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("forge event: %s (PR #%d by %s)",
-		event.Type, event.PRNumber, event.Author.Login)
+	log.Printf("forge event: %s %#v", event.Type, event)
 
 	w.WriteHeader(http.StatusOK)
 
