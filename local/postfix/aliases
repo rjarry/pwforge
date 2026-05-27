@@ -1,2 +1,0 @@
-test-project: root, "|/opt/patchwork/parsemail.sh"
-bridge: /dev/null
