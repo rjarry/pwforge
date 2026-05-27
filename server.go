@@ -12,28 +12,27 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
-	gosync "sync"
+	"sync"
 	"time"
 
 	"github.com/rjarry/pwforge/config"
 	"github.com/rjarry/pwforge/models"
 	"github.com/rjarry/pwforge/patchwork"
-	"github.com/rjarry/pwforge/sync"
 )
 
 type projectState struct {
 	linkName  string
 	pwProject patchwork.Project
 	forge     models.Forge
-	mlToForge *sync.MLToForge
-	forgeToML *sync.ForgeToML
+	mlToForge *MLToForge
+	forgeToML *ForgeToML
 }
 
 type Server struct {
 	conf *config.Config
 	pw   *patchwork.Client
 
-	mu          gosync.RWMutex
+	mu          sync.RWMutex
 	projects    map[string]*projectState // by patchwork link_name
 	forgeIndex  map[string]*projectState // by "owner/repo"
 	lastRefresh time.Time
@@ -191,8 +190,8 @@ func (s *Server) initProject(
 		smtpConf.To = pwp.ListEmail
 	}
 
-	mlToForge := sync.NewMLToForge(s.pw, forge, &gitConf, &smtpConf, pwp.LinkName)
-	forgeToML := sync.NewForgeToML(s.pw, mlToForge.Git(), forge, pwp.LinkName)
+	mlToForge := NewMLToForge(s.pw, forge, &gitConf, &smtpConf, pwp.LinkName)
+	forgeToML := NewForgeToML(s.pw, mlToForge.Git(), forge, pwp.LinkName)
 
 	return &projectState{
 		linkName:  pwp.LinkName,
@@ -291,19 +290,19 @@ func (s *Server) linkForgeOriginatedSeries(seriesID int, p *projectState) bool {
 	if err != nil {
 		return false
 	}
-	prRef, ok := patch.Headers[sync.PRHeader].(string)
+	prRef, ok := patch.Headers[PRHeader].(string)
 	if !ok || prRef == "" {
 		return false
 	}
 	log.Printf("series %d originated from forge PR %s, linking", seriesID, prRef)
 
-	prNumber, err := sync.ParsePRNumber(prRef)
+	prNumber, err := ParsePRNumber(prRef)
 	if err != nil {
 		log.Printf("invalid PR ref in header: %v", err)
 		return false
 	}
 
-	branch, _ := patch.Headers[sync.BranchHeader].(string)
+	branch, _ := patch.Headers[BranchHeader].(string)
 
 	metadata := map[string]interface{}{
 		p.forge.MetaKeyPR(): prRef,
