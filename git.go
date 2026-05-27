@@ -5,7 +5,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,7 +44,7 @@ func (m *GitMirror) EnsureMirror() error {
 		tmpCred.Close()
 		defer os.Remove(tmpCred.Name())
 
-		log.Printf("git: cloning mirror to %s", m.conf.MirrorPath)
+		Infof("git: cloning mirror to %s", m.conf.MirrorPath)
 		if err := os.MkdirAll(filepath.Dir(m.conf.MirrorPath), 0o755); err != nil {
 			return err
 		}
@@ -110,7 +109,7 @@ func (m *GitMirror) EnsureMirror() error {
 }
 
 func (m *GitMirror) Fetch() error {
-	log.Printf("git: fetching mirror %s", m.conf.MirrorPath)
+	Infof("git: fetching mirror %s", m.conf.MirrorPath)
 	return m.withCredentials(func() error {
 		return m.git("-C", m.conf.MirrorPath, "fetch", "--all", "--prune")
 	})
@@ -163,7 +162,7 @@ func (m *GitMirror) SendPatches(
 func (m *GitMirror) SendEmail(
 	from, subject, body, inReplyTo string, extraHeaders ...string,
 ) error {
-	log.Printf("sending email: %s -> %s (in-reply-to: %s): %s",
+	Infof("sending email: %s -> %s (in-reply-to: %s): %s",
 		from, m.smtp.To, inReplyTo, subject)
 
 	tmpFile, err := os.CreateTemp("", "pwforge-email-*.eml")
@@ -228,7 +227,7 @@ func (m *GitMirror) DelWorktree(workdir string) error {
 
 func (m *GitMirror) ApplyMbox(workdir string, mbox []byte) error {
 	mboxPath := filepath.Join(workdir, "series.mbox")
-	log.Printf("git: writing mbox (%d bytes) to %s", len(mbox), mboxPath)
+	Infof("git: writing mbox (%d bytes) to %s", len(mbox), mboxPath)
 	if err := os.WriteFile(mboxPath, mbox, 0o644); err != nil {
 		return fmt.Errorf("write mbox: %w", err)
 	}
@@ -243,7 +242,7 @@ func (m *GitMirror) Push(workdir, branch string) error {
 }
 
 func (m *GitMirror) gitCmd(args ...string) *exec.Cmd {
-	log.Printf("+ git %s", strings.Join(args, " "))
+	Debugf("+ git %s", strings.Join(args, " "))
 	cmd := exec.Command("git", args...)
 	cmd.Env = append(os.Environ(),
 		"GIT_CONFIG_GLOBAL=/dev/null",

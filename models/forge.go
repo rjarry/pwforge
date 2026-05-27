@@ -14,6 +14,7 @@ const CommentMarker = "<!-- pwforge -->"
 
 type ForgeEvent struct {
 	Type           string // "issue_comment", "review_comment", "check", "pull_request"
+	RepoKey        string
 	PRNumber       int
 	Author         ForgeUser
 	Body           string
@@ -66,24 +67,58 @@ type Forge interface {
 	PRRefSpec(prNumber int) string
 	CreatePR(title, body, head, base string) (int, error)
 	PostComment(prNumber int, body string) error
-	ParseWebhook(body []byte, headers http.Header) (*ForgeEvent, error)
-	VerifyWebhookSignature(body []byte, signature string) bool
-	Owner() string
-	Repo() string
+	RepoKey() string
 }
 
 type ForgeConstructor func(conf *config.Config, project *config.ProjectConfig) (Forge, error)
 
-var forges = make(map[string]ForgeConstructor)
+type WebhookParser func(body []byte, headers http.Header) (*ForgeEvent, error)
 
-func RegisterForge(name string, c ForgeConstructor) {
-	forges[name] = c
+type WebhookParserFactory func(conf *config.Config) (WebhookParser, error)
+
+type RepoResolver func(rawURL string) (owner, repo string, ok bool)
+
+type forgeType struct {
+	newForge    ForgeConstructor
+	newParser   WebhookParserFactory
+	resolveRepo RepoResolver
+}
+
+var forges = make(map[string]*forgeType)
+
+func RegisterForge(
+	name string,
+	c ForgeConstructor,
+	p WebhookParserFactory,
+	r RepoResolver,
+) {
+	forges[name] = &forgeType{
+		newForge:    c,
+		newParser:   p,
+		resolveRepo: r,
+	}
 }
 
 func NewForge(conf *config.Config, project *config.ProjectConfig) (Forge, error) {
-	ctor, found := forges[conf.Forge]
+	ft, found := forges[conf.Forge]
 	if !found {
 		return nil, fmt.Errorf("unknown forge %q", conf.Forge)
 	}
-	return ctor(conf, project)
+	return ft.newForge(conf, project)
+}
+
+func NewWebhookParser(conf *config.Config) (WebhookParser, error) {
+	ft, found := forges[conf.Forge]
+	if !found {
+		return nil, fmt.Errorf("unknown forge %q", conf.Forge)
+	}
+	return ft.newParser(conf)
+}
+
+func ResolveRepo(forge, rawURL string) (owner, repo string, ok bool) {
+	ft, found := forges[forge]
+	if !found {
+		return "", "", false
+	}
+	return ft.resolveRepo(rawURL)
 }

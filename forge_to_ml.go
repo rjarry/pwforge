@@ -5,7 +5,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -16,14 +15,13 @@ import (
 
 type ForgeToML struct {
 	pw      *patchwork.Client
-	git     *GitMirror
 	forge   models.Forge
+	git     *GitMirror
 	project string
 }
 
 func NewForgeToML(
-	pw *patchwork.Client, git *GitMirror,
-	forge models.Forge, project string,
+	pw *patchwork.Client, forge models.Forge, git *GitMirror, project string,
 ) *ForgeToML {
 	return &ForgeToML{pw: pw, git: git, forge: forge, project: project}
 }
@@ -34,7 +32,7 @@ func (g *ForgeToML) HandleIssueComment(
 	event *models.ForgeEvent, series *patchwork.Series,
 ) error {
 	if series.CoverLetter == nil {
-		log.Printf("series %d has no cover letter, using first patch", series.ID)
+		Infof("series %d has no cover letter, using first patch", series.ID)
 	}
 
 	replyTo := g.replyToMsgID(series, "")
@@ -93,7 +91,7 @@ func (g *ForgeToML) HandleCheckPending(
 		if err := g.pw.CreateCheck(
 			ps.ID, "pending", event.CheckName, event.CheckURL, "",
 		); err != nil {
-			log.Printf("failed to create pending check on patch %d: %v",
+			Errorf("failed to create pending check on patch %d: %v",
 				ps.ID, err)
 		}
 	}
@@ -110,7 +108,7 @@ func (g *ForgeToML) HandleCheckEvent(
 			if err := g.pw.CreateCheck(
 				ps.ID, state, run.Name, run.URL, run.Desc,
 			); err != nil {
-				log.Printf("failed to create check %q on patch %d: %v",
+				Errorf("failed to create check %q on patch %d: %v",
 					run.Name, ps.ID, err)
 			}
 		}

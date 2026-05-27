@@ -14,6 +14,7 @@ import (
 type Config struct {
 	Listen    string          `ini:"listen"`
 	Forge     string          `ini:"forge"`
+	QueueSize int             `ini:"queue-size"`
 	Patchwork PatchworkConfig `ini:"patchwork"`
 	GitHub    GitHubConfig    `ini:"github"`
 	SMTP      SMTPConfig      `ini:"smtp"`
@@ -82,9 +83,10 @@ type ProjectConfig struct {
 
 func LoadConfig(path string) (*Config, error) {
 	cfg := &Config{
-		Listen: ":8080",
-		Forge:  "github",
-		GitHub: GitHubConfig{},
+		Listen:    ":8080",
+		Forge:     "github",
+		QueueSize: 10,
+		GitHub:    GitHubConfig{},
 		SMTP: SMTPConfig{
 			Port:       587,
 			Encryption: "tls",
