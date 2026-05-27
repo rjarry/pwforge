@@ -107,6 +107,7 @@ type Patch struct {
 	State     string                 `json:"state"`
 	Mbox      string                 `json:"mbox"`
 	Content   string                 `json:"content"`
+	Series    []PatchSummary         `json:"series"`
 	Diff      string                 `json:"diff"`
 	Headers   map[string]interface{} `json:"headers"`
 	Prefixes  []string               `json:"prefixes"`

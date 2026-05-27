@@ -370,12 +370,8 @@ func (m *MLToForge) HandleCommentCreated(event *patchwork.Event) error {
 		commentAuthor = fmt.Sprintf("%s <%s>",
 			last.Submitter.Name, last.Submitter.Email)
 
-		if fullPatch.Metadata != nil {
-			if s, ok := fullPatch.Metadata["series"].([]interface{}); ok && len(s) > 0 {
-				if sid, ok := s[0].(map[string]interface{})["id"].(float64); ok {
-					seriesID = int(sid)
-				}
-			}
+		if len(fullPatch.Series) > 0 {
+			seriesID = fullPatch.Series[0].ID
 		}
 	} else if c := event.Payload.Cover; c != nil {
 		cover, err := m.pw.GetCover(c.ID)
