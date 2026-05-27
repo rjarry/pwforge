@@ -1,4 +1,4 @@
-From 337cb93e33e12999fca21166089d16dc1a0d9467 Mon Sep 17 00:00:00 2001
+From 0058cf3a9eaf4d3497e748f1c3a7f1c911d1e230 Mon Sep 17 00:00:00 2001
 From: Robin Jarry <robin@jarry.cc>
 Date: Tue, 26 May 2026 15:28:19 +0200
 Subject: [PATCH 6/6] series: add respin tracking for patch series versions
@@ -10,10 +10,12 @@ be walked in both directions to find all versions of a series.
 
 The matching heuristic works in two tiers. First, In-Reply-To and
 References headers are checked against SeriesReference entries to find
-a direct threading link to the previous version. This handles the
-common git send-email workflow where v2 is sent as a reply to v1.
-If no match is found through references, fall back to comparing series
-names and individual patch subjects using SequenceMatcher with a 0.8
+a threading link to any earlier version of the series from the same
+submitter. Since respins may reply to any previous version (e.g. v3
+replying to v1 instead of v2), the code walks the matched series'
+version chain to locate the direct predecessor (version N-1). If no
+match is found through references, fall back to comparing series names
+and individual patch subjects using SequenceMatcher with a 0.8
 similarity threshold, filtered by same submitter and consecutive
 version number.
 
@@ -27,14 +29,15 @@ patch and cover letter detail pages with links to all versions.
 
 Signed-off-by: Robin Jarry <rjarry@redhat.com>
 ---
- patchwork/api/series.py                       |  15 ++-
- .../migrations/0051_series_respin_tracking.py |  33 ++++++
- patchwork/models.py                           |  34 ++++++
- patchwork/parser.py                           | 112 ++++++++++++++++++
- patchwork/templates/patchwork/submission.html |  15 +++
+ patchwork/api/series.py                       |  15 +-
+ .../migrations/0051_series_respin_tracking.py |  33 ++++
+ patchwork/models.py                           |  34 +++++
+ patchwork/parser.py                           | 141 ++++++++++++++++++
+ patchwork/templates/patchwork/submission.html |  15 ++
+ patchwork/tests/api/test_series.py            |   2 +-
  patchwork/views/cover.py                      |   3 +
  patchwork/views/patch.py                      |   2 +
- 7 files changed, 212 insertions(+), 2 deletions(-)
+ 8 files changed, 242 insertions(+), 3 deletions(-)
  create mode 100644 patchwork/migrations/0051_series_respin_tracking.py
 
 diff --git a/patchwork/api/series.py b/patchwork/api/series.py
@@ -188,7 +191,7 @@ index 37b90a74bf6c..1b8a1476d64e 100644
          if not user.is_authenticated:
              return False
 diff --git a/patchwork/parser.py b/patchwork/parser.py
-index c33ada8d7d42..cf56849f97ef 100644
+index c33ada8d7d42..baba4828f5d2 100644
 --- a/patchwork/parser.py
 +++ b/patchwork/parser.py
 @@ -6,6 +6,7 @@
@@ -199,7 +202,7 @@ index c33ada8d7d42..cf56849f97ef 100644
  from email.header import decode_header
  from email.header import make_header
  from email.utils import mktime_tz
-@@ -335,6 +336,99 @@ def find_series(project, mail, author):
+@@ -335,6 +336,128 @@ def find_series(project, mail, author):
      return _find_series_by_markers(project, mail, author)
  
  
@@ -220,11 +223,34 @@ index c33ada8d7d42..cf56849f97ef 100644
 +    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 +
 +
++def _find_version_in_chain(series, target_version):
++    """Walk a series' version chain to find a specific version."""
++    # walk backward
++    current = series
++    while current:
++        if current.version == target_version:
++            return current
++        current = current.previous_series
++
++    # walk forward
++    current = series
++    while current:
++        if current.version == target_version:
++            return current
++        nxt = current.next_series.order_by('version').first()
++        if nxt and nxt.id != current.id:
++            current = nxt
++        else:
++            break
++
++    return None
++
++
 +def find_previous_series(project, series, refs):
 +    """Find the previous version of a series for respin tracking.
 +
 +    Uses a two-tier heuristic: first check mail references for a
-+    direct threading link to the previous version, then fall back to
++    direct threading link to a related series, then fall back to
 +    name and patch subject similarity matching.
 +    """
 +    if series.version <= 1:
@@ -232,8 +258,9 @@ index c33ada8d7d42..cf56849f97ef 100644
 +
 +    prev_version = series.version - 1
 +
-+    # tier 1: check In-Reply-To / References for a link to the
-+    # previous version's series
++    # tier 1: check In-Reply-To / References for a link to any
++    # version of the same series from the same submitter, then walk
++    # the version chain to find version N-1
 +    for ref in refs:
 +        try:
 +            sr = SeriesReference.objects.get(
@@ -241,10 +268,15 @@ index c33ada8d7d42..cf56849f97ef 100644
 +            )
 +        except SeriesReference.DoesNotExist:
 +            continue
-+        prev = sr.series
-+        if prev.id == series.id:
++        linked = sr.series
++        if linked.id == series.id:
 +            continue
-+        if prev.version == prev_version and prev.submitter == series.submitter:
++        if linked.submitter != series.submitter:
++            continue
++        if linked.version >= series.version:
++            continue
++        prev = _find_version_in_chain(linked, prev_version)
++        if prev:
 +            return prev
 +
 +    # tier 2: name + submitter matching
@@ -299,7 +331,7 @@ index c33ada8d7d42..cf56849f97ef 100644
  def split_from_header(from_header):
      name, email = (None, None)
  
-@@ -1391,6 +1485,15 @@ def parse_mail(mail, list_id=None):
+@@ -1391,6 +1514,15 @@ def parse_mail(mail, list_id=None):
          # parse patch dependencies
          series.add_dependencies(parse_depends_on(message))
  
@@ -315,7 +347,7 @@ index c33ada8d7d42..cf56849f97ef 100644
          return patch
      elif x == 0:  # (potential) cover letters
          # if refs are empty, it's implicitly a cover letter. If not,
-@@ -1462,6 +1565,15 @@ def parse_mail(mail, list_id=None):
+@@ -1462,6 +1594,15 @@ def parse_mail(mail, list_id=None):
              # entire patch series; parse them
              series.add_dependencies(parse_depends_on(message))
  
@@ -357,6 +389,19 @@ index bcf36c1c6cac..38b0de30873d 100644
  {% if submission.series.metadata.all %}
    <tr>
      <th>Metadata</th>
+diff --git a/patchwork/tests/api/test_series.py b/patchwork/tests/api/test_series.py
+index 9a92e360c443..642e72504dbb 100644
+--- a/patchwork/tests/api/test_series.py
++++ b/patchwork/tests/api/test_series.py
+@@ -197,7 +197,7 @@ class TestSeriesAPI(utils.APITestCase):
+             create_cover(series=series_obj)
+             create_patch(series=series_obj)
+ 
+-        with self.assertNumQueries(9):
++        with self.assertNumQueries(10):
+             self.client.get(self.api_url())
+ 
+     @utils.store_samples('series-detail')
 diff --git a/patchwork/views/cover.py b/patchwork/views/cover.py
 index 15013a89e1ce..2a501cfed572 100644
 --- a/patchwork/views/cover.py
