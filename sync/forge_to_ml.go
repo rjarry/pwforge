@@ -15,12 +15,17 @@ import (
 )
 
 type ForgeToML struct {
-	pw  *patchwork.Client
-	git *GitMirror
+	pw      *patchwork.Client
+	git     *GitMirror
+	forge   models.Forge
+	project string
 }
 
-func NewForgeToML(pw *patchwork.Client, git *GitMirror) *ForgeToML {
-	return &ForgeToML{pw: pw, git: git}
+func NewForgeToML(
+	pw *patchwork.Client, git *GitMirror,
+	forge models.Forge, project string,
+) *ForgeToML {
+	return &ForgeToML{pw: pw, git: git, forge: forge, project: project}
 }
 
 const EventHeader = "X-PWForge-Event"
@@ -164,9 +169,7 @@ func (g *ForgeToML) replyToMsgID(series *patchwork.Series, filePath string) stri
 	return ""
 }
 
-func (g *ForgeToML) HandlePullRequest(
-	event *models.ForgeEvent, forge models.Forge, project string,
-) error {
+func (g *ForgeToML) HandlePullRequest(event *models.ForgeEvent) error {
 	if err := g.git.EnsureMirror(); err != nil {
 		return err
 	}
@@ -187,10 +190,10 @@ func (g *ForgeToML) HandlePullRequest(
 	version := 1
 	var inReplyTo string
 	if event.PRAction == "synchronize" {
-		version, inReplyTo = g.nextVersionAndReplyTo(event, forge, project)
+		version, inReplyTo = g.nextVersionAndReplyTo(event)
 	}
 
-	prURL := forge.PRRef(event.PRNumber)
+	prURL := g.forge.PRRef(event.PRNumber)
 	return g.git.SendPatches(
 		workdir, event.PRBase,
 		event.PRTitle, sanitizePRBody(event.PRBody),
@@ -201,10 +204,10 @@ func (g *ForgeToML) HandlePullRequest(
 }
 
 func (g *ForgeToML) nextVersionAndReplyTo(
-	event *models.ForgeEvent, forge models.Forge, project string,
+	event *models.ForgeEvent,
 ) (int, string) {
-	prRef := forge.PRRef(event.PRNumber)
-	matches, err := g.pw.FindSeriesByMetadata(project, forge.MetaKeyPR(), prRef)
+	prRef := g.forge.PRRef(event.PRNumber)
+	matches, err := g.pw.FindSeriesByMetadata(g.project, g.forge.MetaKeyPR(), prRef)
 	if err != nil || len(matches) == 0 {
 		return 1, ""
 	}

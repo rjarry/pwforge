@@ -162,21 +162,22 @@ project = test-project
 [github]
 token = $GH_TOKEN
 webhook-secret = $GH_WEBHOOK_SECRET
-owner = ${GH_UPSTREAM_OWNER:-$GH_USER}
-repo = ${GH_UPSTREAM_REPO:-$GITHUB_REPO}
-$([ -n "$GH_UPSTREAM_OWNER" ] && echo "fork-owner = $GH_USER")
-$([ -n "$GH_UPSTREAM_REPO" ] && echo "fork-repo = $GITHUB_REPO")
 
 [smtp]
 host = localhost
 port = 1587
 encryption = none
 from = Pwforge Bridge <bridge@pwforge.test>
-to = Test Project <test-project@lists.pwforge.test>
 
 [git]
 mirror-path = $BUILDDIR/mirror
 subject-prefix = PATCH test
+
+[project "test-project"]
+owner = ${GH_UPSTREAM_OWNER:-$GH_USER}
+repo = ${GH_UPSTREAM_REPO:-$GITHUB_REPO}
+$([ -n "$GH_UPSTREAM_OWNER" ] && echo "fork-owner = $GH_USER")
+$([ -n "$GH_UPSTREAM_REPO" ] && echo "fork-repo = $GITHUB_REPO")
 EOF
 
 # -- ensure gh-webhook extension ----------------------------------------------

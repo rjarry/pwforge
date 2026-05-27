@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Robin Jarry <robin@jarry.cc>
 
-import os
 import django
 
 django.setup()
@@ -32,7 +31,7 @@ project, _ = Project.objects.get_or_create(
     defaults={
         "name": "Test Project",
         "listid": "test-project.pwforge.test",
-        "listemail": "test-project@pwforge.test",
+        "listemail": "test-project@lists.pwforge.test",
         "auto_supersede": True,
     },
 )

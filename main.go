@@ -8,7 +8,6 @@ import (
 	"log"
 
 	"github.com/rjarry/pwforge/config"
-	"github.com/rjarry/pwforge/models"
 
 	_ "github.com/rjarry/pwforge/github"
 )
@@ -23,12 +22,7 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	forge, err := models.NewForge(conf)
-	if err != nil {
-		log.Fatalf("forge: %v", err)
-	}
-
-	srv := NewServer(conf, forge)
+	srv := NewServer(conf)
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("server: %v", err)
 	}

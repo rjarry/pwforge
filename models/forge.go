@@ -66,10 +66,13 @@ type Forge interface {
 	PRRefSpec(prNumber int) string
 	CreatePR(title, body, head, base string) (int, error)
 	PostComment(prNumber int, body string) error
-	ParseWebhook(r *http.Request) (*ForgeEvent, error)
+	ParseWebhook(body []byte, headers http.Header) (*ForgeEvent, error)
+	VerifyWebhookSignature(body []byte, signature string) bool
+	Owner() string
+	Repo() string
 }
 
-type ForgeConstructor func(*config.Config) (Forge, error)
+type ForgeConstructor func(conf *config.Config, project *config.ProjectConfig) (Forge, error)
 
 var forges = make(map[string]ForgeConstructor)
 
@@ -77,10 +80,10 @@ func RegisterForge(name string, c ForgeConstructor) {
 	forges[name] = c
 }
 
-func NewForge(conf *config.Config) (Forge, error) {
+func NewForge(conf *config.Config, project *config.ProjectConfig) (Forge, error) {
 	ctor, found := forges[conf.Forge]
 	if !found {
 		return nil, fmt.Errorf("unknown forge %q", conf.Forge)
 	}
-	return ctor(conf)
+	return ctor(conf, project)
 }

@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -34,7 +33,7 @@ type GitHub struct {
 	baseBranch    string
 }
 
-func New(conf *config.Config) (models.Forge, error) {
+func New(conf *config.Config, project *config.ProjectConfig) (models.Forge, error) {
 	var ts *TokenSource
 	var err error
 
@@ -63,19 +62,19 @@ func New(conf *config.Config) (models.Forge, error) {
 		client.BaseURL = u
 	}
 
-	forkOwner := conf.GitHub.ForkOwner
+	forkOwner := project.ForkOwner
 	if forkOwner == "" {
-		forkOwner = conf.GitHub.Owner
+		forkOwner = project.Owner
 	}
-	forkRepo := conf.GitHub.ForkRepo
+	forkRepo := project.ForkRepo
 	if forkRepo == "" {
-		forkRepo = conf.GitHub.Repo
+		forkRepo = project.Repo
 	}
 
 	return &GitHub{
 		client:        client,
-		owner:         conf.GitHub.Owner,
-		repo:          conf.GitHub.Repo,
+		owner:         project.Owner,
+		repo:          project.Repo,
 		forkOwner:     forkOwner,
 		forkRepo:      forkRepo,
 		webhookSecret: conf.GitHub.WebhookSecret,
@@ -114,6 +113,8 @@ func (g *GitHub) WriteCredentials(path string) error {
 	return os.WriteFile(path, []byte(line), 0o600)
 }
 
+func (g *GitHub) Owner() string         { return g.owner }
+func (g *GitHub) Repo() string          { return g.repo }
 func (g *GitHub) MetaKeyPR() string     { return "github_pr" }
 func (g *GitHub) MetaKeyBranch() string { return "github_branch" }
 
@@ -155,18 +156,8 @@ func (g *GitHub) PostComment(prNumber int, body string) error {
 	return err
 }
 
-func (g *GitHub) ParseWebhook(r *http.Request) (*models.ForgeEvent, error) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
-
-	sig := r.Header.Get("X-Hub-Signature-256")
-	if !g.verifySignature(body, sig) {
-		return nil, fmt.Errorf("invalid signature")
-	}
-
-	eventType := r.Header.Get("X-GitHub-Event")
+func (g *GitHub) ParseWebhook(body []byte, headers http.Header) (*models.ForgeEvent, error) {
+	eventType := headers.Get("X-GitHub-Event")
 	log.Printf("github webhook: %s (%d bytes)", eventType, len(body))
 
 	switch eventType {
@@ -367,7 +358,7 @@ func (g *GitHub) parsePullRequest(body []byte) (*models.ForgeEvent, error) {
 	}, nil
 }
 
-func (g *GitHub) verifySignature(body []byte, signature string) bool {
+func (g *GitHub) VerifyWebhookSignature(body []byte, signature string) bool {
 	if g.webhookSecret == "" {
 		return true
 	}

@@ -21,16 +21,22 @@ type MLToForge struct {
 	forge        models.Forge
 	git          *GitMirror
 	branchPrefix string
+	project      string
 }
 
 func NewMLToForge(
-	pw *patchwork.Client, forge models.Forge, conf *config.Config,
+	pw *patchwork.Client,
+	forge models.Forge,
+	gitConf *config.GitConfig,
+	smtpConf *config.SMTPConfig,
+	project string,
 ) *MLToForge {
 	return &MLToForge{
 		pw:           pw,
 		forge:        forge,
-		git:          NewGitMirror(&conf.Git, &conf.SMTP, forge),
-		branchPrefix: conf.Git.BranchPrefix,
+		git:          NewGitMirror(gitConf, smtpConf, forge),
+		branchPrefix: gitConf.BranchPrefix,
+		project:      project,
 	}
 }
 
