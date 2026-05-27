@@ -172,8 +172,8 @@ func (g *GitHub) ParseWebhook(r *http.Request) (*models.ForgeEvent, error) {
 	switch eventType {
 	case "issue_comment":
 		return g.parseIssueComment(body)
-	case "pull_request_review_comment":
-		return g.parseReviewComment(body)
+	case "pull_request_review":
+		return g.parseReview(body)
 	case "check_run":
 		return g.parseCheckRun(body)
 	case "check_suite":
@@ -212,30 +212,50 @@ func (g *GitHub) parseIssueComment(body []byte) (*models.ForgeEvent, error) {
 	}, nil
 }
 
-func (g *GitHub) parseReviewComment(body []byte) (*models.ForgeEvent, error) {
-	var payload gh.PullRequestReviewCommentEvent
+func (g *GitHub) parseReview(body []byte) (*models.ForgeEvent, error) {
+	var payload gh.PullRequestReviewEvent
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("parse review_comment: %w", err)
+		return nil, fmt.Errorf("parse pull_request_review: %w", err)
 	}
-	if payload.GetAction() != "created" {
+	if payload.GetAction() != "submitted" {
 		return nil, nil
 	}
-	if strings.Contains(payload.GetComment().GetBody(), models.CommentMarker) {
+	review := payload.GetReview()
+	if strings.Contains(review.GetBody(), models.CommentMarker) {
 		return nil, nil
 	}
-	comment := payload.GetComment()
-	user := comment.GetUser()
+	user := review.GetUser()
+	pr := payload.GetPullRequest()
+
+	// fetch all inline comments for this review
+	comments, _, err := g.client.PullRequests.ListReviewComments(
+		context.Background(), g.owner, g.repo,
+		pr.GetNumber(), review.GetID(), nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list review comments: %w", err)
+	}
+
+	var reviewComments []models.ReviewComment
+	for _, c := range comments {
+		reviewComments = append(reviewComments, models.ReviewComment{
+			Path:     c.GetPath(),
+			DiffHunk: c.GetDiffHunk(),
+			Body:     c.GetBody(),
+		})
+	}
+
 	return &models.ForgeEvent{
-		Type:     "review_comment",
-		PRNumber: payload.GetPullRequest().GetNumber(),
+		Type:     "review",
+		PRNumber: pr.GetNumber(),
 		Author: models.ForgeUser{
 			Login: user.GetLogin(),
 			Name:  user.GetName(),
 			Email: user.GetEmail(),
 		},
-		Body:     comment.GetBody(),
-		Path:     comment.GetPath(),
-		DiffHunk: comment.GetDiffHunk(),
+		Body:           review.GetBody(),
+		ReviewState:    review.GetState(),
+		ReviewComments: reviewComments,
 	}, nil
 }
 

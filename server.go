@@ -192,9 +192,9 @@ func (s *Server) handleForgeEvent(event *models.ForgeEvent) {
 		if err := s.forgeToML.HandleIssueComment(event, series); err != nil {
 			log.Printf("issue_comment error: %v", err)
 		}
-	case "review_comment":
-		if err := s.forgeToML.HandleReviewComment(event, series); err != nil {
-			log.Printf("review_comment error: %v", err)
+	case "review":
+		if err := s.forgeToML.HandleReview(event, series); err != nil {
+			log.Printf("review error: %v", err)
 		}
 	case "check_pending":
 		if err := s.forgeToML.HandleCheckPending(event, series); err != nil {
