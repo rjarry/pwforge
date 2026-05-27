@@ -24,3 +24,4 @@ lmtp       unix       -       -       n       -       -       lmtp
 anvil      unix       -       -       n       -       1       anvil
 scache     unix       -       -       n       -       1       scache
 postlog    unix-dgram n       -       n       -       1       postlogd
+patchwork  unix       -       n       n       -       -       pipe flags=FR user=root directory=/opt/patchwork argv=/usr/local/bin/python3 manage.py parsemail
