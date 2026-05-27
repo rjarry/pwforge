@@ -174,6 +174,8 @@ func (g *GitHub) ParseWebhook(r *http.Request) (*models.ForgeEvent, error) {
 		return g.parseIssueComment(body)
 	case "pull_request_review_comment":
 		return g.parseReviewComment(body)
+	case "check_run":
+		return g.parseCheckRun(body)
 	case "check_suite":
 		return g.parseCheckSuite(body)
 	case "pull_request":
@@ -237,6 +239,28 @@ func (g *GitHub) parseReviewComment(body []byte) (*models.ForgeEvent, error) {
 	}, nil
 }
 
+func (g *GitHub) parseCheckRun(body []byte) (*models.ForgeEvent, error) {
+	var payload gh.CheckRunEvent
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("parse check_run: %w", err)
+	}
+	if payload.GetAction() != "created" {
+		return nil, nil
+	}
+	run := payload.GetCheckRun()
+	prs := run.PullRequests
+	if len(prs) == 0 {
+		return nil, nil
+	}
+	return &models.ForgeEvent{
+		Type:        "check_pending",
+		PRNumber:    prs[0].GetNumber(),
+		CheckName:   run.GetName(),
+		CheckStatus: "pending",
+		CheckURL:    run.GetHTMLURL(),
+	}, nil
+}
+
 func (g *GitHub) parseCheckSuite(body []byte) (*models.ForgeEvent, error) {
 	var payload gh.CheckSuiteEvent
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -260,12 +284,23 @@ func (g *GitHub) parseCheckSuite(body []byte) (*models.ForgeEvent, error) {
 		return nil, fmt.Errorf("list check runs: %w", err)
 	}
 
+	var checkRuns []models.CheckRun
 	var desc strings.Builder
 	for _, run := range runs.CheckRuns {
 		status := run.GetConclusion()
 		if status == "" {
 			status = run.GetStatus()
 		}
+		var runDesc string
+		if output := run.GetOutput(); output != nil {
+			runDesc = output.GetSummary()
+		}
+		checkRuns = append(checkRuns, models.CheckRun{
+			Name:   run.GetName(),
+			Status: status,
+			URL:    run.GetHTMLURL(),
+			Desc:   runDesc,
+		})
 		fmt.Fprintf(&desc, "%s %s", run.GetName(), status)
 		if url := run.GetHTMLURL(); url != "" {
 			fmt.Fprintf(&desc, ": %s", url)
@@ -279,6 +314,7 @@ func (g *GitHub) parseCheckSuite(body []byte) (*models.ForgeEvent, error) {
 		CheckName:   suite.GetApp().GetName(),
 		CheckStatus: suite.GetConclusion(),
 		CheckDesc:   desc.String(),
+		CheckRuns:   checkRuns,
 	}, nil
 }
 

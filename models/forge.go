@@ -22,7 +22,9 @@ type ForgeEvent struct {
 	// check event fields
 	CheckName   string
 	CheckStatus string
+	CheckURL    string
 	CheckDesc   string
+	CheckRuns   []CheckRun
 	// pull_request event fields
 	PRTitle      string
 	PRBody       string
@@ -31,6 +33,13 @@ type ForgeEvent struct {
 	PRHeadBranch string // branch name (for loop detection)
 	PRAction     string
 	PRBefore     string // previous head SHA (for synchronize)
+}
+
+type CheckRun struct {
+	Name   string
+	Status string
+	URL    string
+	Desc   string
 }
 
 type ForgeUser struct {
