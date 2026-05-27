@@ -43,6 +43,7 @@ type SMTPConfig struct {
 	Host       string `ini:"host"`
 	Port       int    `ini:"port"`
 	Encryption string `ini:"encryption"`
+	Auth       string `ini:"auth"`
 	Username   string `ini:"username"`
 	Password   string `ini:"password"`
 	From       string `ini:"from"`

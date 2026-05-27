@@ -88,12 +88,21 @@ func (m *GitMirror) EnsureMirror() error {
 		"format.subjectPrefix":         m.conf.SubjectPrefix,
 		"format.coverFromDescription":  "subject",
 	}
+	if m.smtp.Auth != "" {
+		gitConfig["sendemail.smtpAuth"] = m.smtp.Auth
+	}
 	if m.smtp.Username != "" {
 		gitConfig["sendemail.smtpUser"] = m.smtp.Username
-		gitConfig["sendemail.smtpPass"] = m.smtp.Password
 	}
 	for k, v := range gitConfig {
 		if err := m.git("-C", m.conf.MirrorPath, "config", k, v); err != nil {
+			return err
+		}
+	}
+	// write password separately to avoid logging it
+	if m.smtp.Password != "" {
+		if err := m.gitQuiet("-C", m.conf.MirrorPath, "config",
+			"sendemail.smtpPass", m.smtp.Password); err != nil {
 			return err
 		}
 	}
@@ -242,6 +251,21 @@ func (m *GitMirror) gitCmd(args ...string) *exec.Cmd {
 		"GIT_TERMINAL_PROMPT=0",
 	)
 	return cmd
+}
+
+func (m *GitMirror) gitQuiet(args ...string) error {
+	cmd := exec.Command("git", args...)
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_TERMINAL_PROMPT=0",
+	)
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git config: %w", err)
+	}
+	return nil
 }
 
 func (m *GitMirror) git(args ...string) error {
