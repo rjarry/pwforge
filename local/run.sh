@@ -143,11 +143,10 @@ esac
 # -- build --------------------------------------------------------------------
 
 echo "building pwforge..."
-make -C "$ROOT_DIR" pwforge >/dev/null
+make -C "$ROOT_DIR" pwforge
 
 echo "building patchwork image..."
-podman build -f "$SCRIPT_DIR/patchwork/Containerfile" \
-	-t localhost/pwforge-patchwork "$SCRIPT_DIR/patchwork"
+podman build -t localhost/pwforge-patchwork "$SCRIPT_DIR"
 
 # -- pwforge config -----------------------------------------------------------
 
