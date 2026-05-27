@@ -128,6 +128,25 @@ func (c *Client) UpdateSeriesMetadata(seriesID int, metadata map[string]interfac
 		bytes.NewReader(body), nil)
 }
 
+func (c *Client) CreateCheck(patchID int, state, context, targetURL, description string) error {
+	check := map[string]string{
+		"state":   state,
+		"context": context,
+	}
+	if targetURL != "" {
+		check["target_url"] = targetURL
+	}
+	if description != "" {
+		check["description"] = description
+	}
+	body, err := json.Marshal(check)
+	if err != nil {
+		return err
+	}
+	return c.doJSON("POST", fmt.Sprintf("patches/%d/checks/", patchID),
+		bytes.NewReader(body), nil)
+}
+
 func (c *Client) FindSeriesByMetadata(project, key, value string) ([]Series, error) {
 	var series []Series
 	path := fmt.Sprintf("series/?project=%s&metadata_key=%s&metadata_value=%s&order=-id&per_page=1",

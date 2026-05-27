@@ -69,9 +69,37 @@ func (g *ForgeToML) HandleReviewComment(
 	return g.sendEmail(from, subject, msgBody.String(), replyTo)
 }
 
+func (g *ForgeToML) HandleCheckPending(
+	event *models.ForgeEvent, series *patchwork.Series,
+) error {
+	for _, ps := range series.Patches {
+		if err := g.pw.CreateCheck(
+			ps.ID, "pending", event.CheckName, event.CheckURL, "",
+		); err != nil {
+			log.Printf("failed to create pending check on patch %d: %v",
+				ps.ID, err)
+		}
+	}
+	return nil
+}
+
 func (g *ForgeToML) HandleCheckEvent(
 	event *models.ForgeEvent, series *patchwork.Series,
 ) error {
+	// post individual checks on each patch via patchwork API
+	for _, run := range event.CheckRuns {
+		state := mapCheckState(run.Status)
+		for _, ps := range series.Patches {
+			if err := g.pw.CreateCheck(
+				ps.ID, state, run.Name, run.URL, run.Desc,
+			); err != nil {
+				log.Printf("failed to create check %q on patch %d: %v",
+					run.Name, ps.ID, err)
+			}
+		}
+	}
+
+	// also send an email to the mailing list
 	replyTo := g.replyToMsgID(series, "")
 	if replyTo == "" {
 		return fmt.Errorf("no message-id found for series %d", series.ID)
@@ -86,6 +114,19 @@ func (g *ForgeToML) HandleCheckEvent(
 	}
 
 	return g.sendEmail(g.smtp.From, subject, body.String(), replyTo)
+}
+
+func mapCheckState(ghConclusion string) string {
+	switch ghConclusion {
+	case "success":
+		return "success"
+	case "failure", "timed_out", "cancelled":
+		return "fail"
+	case "action_required":
+		return "warning"
+	default:
+		return "pending"
+	}
 }
 
 func (g *ForgeToML) replyToMsgID(series *patchwork.Series, filePath string) string {
