@@ -6,24 +6,24 @@ package sync
 import (
 	"fmt"
 	"log"
-	"net/smtp"
 	"os"
 	"regexp"
 	"strings"
 
-	"github.com/rjarry/pwforge/config"
 	"github.com/rjarry/pwforge/models"
 	"github.com/rjarry/pwforge/patchwork"
 )
 
 type ForgeToML struct {
-	pw   *patchwork.Client
-	smtp *config.SMTPConfig
+	pw  *patchwork.Client
+	git *GitMirror
 }
 
-func NewForgeToML(pw *patchwork.Client, smtp *config.SMTPConfig) *ForgeToML {
-	return &ForgeToML{pw: pw, smtp: smtp}
+func NewForgeToML(pw *patchwork.Client, git *GitMirror) *ForgeToML {
+	return &ForgeToML{pw: pw, git: git}
 }
+
+const EventHeader = "X-PWForge-Event"
 
 func (g *ForgeToML) HandleIssueComment(
 	event *models.ForgeEvent, series *patchwork.Series,
@@ -40,7 +40,7 @@ func (g *ForgeToML) HandleIssueComment(
 	from := g.senderAddress(event.Author)
 	subject := "Re: " + series.Name
 
-	return g.sendEmail(from, subject, event.Body, replyTo,
+	return g.git.SendEmail(from, subject, event.Body, replyTo,
 		EventHeader+": comment")
 }
 
@@ -67,7 +67,7 @@ func (g *ForgeToML) HandleReviewComment(
 	}
 	msgBody.WriteString(event.Body)
 
-	return g.sendEmail(from, subject, msgBody.String(), replyTo,
+	return g.git.SendEmail(from, subject, msgBody.String(), replyTo,
 		EventHeader+": review")
 }
 
@@ -115,7 +115,7 @@ func (g *ForgeToML) HandleCheckEvent(
 		fmt.Fprintf(&body, "\n%s", event.CheckDesc)
 	}
 
-	return g.sendEmail(g.smtp.From, subject, body.String(), replyTo,
+	return g.git.SendEmail(g.git.smtp.From, subject, body.String(), replyTo,
 		EventHeader+": check")
 }
 
@@ -155,13 +155,12 @@ func (g *ForgeToML) replyToMsgID(series *patchwork.Series, filePath string) stri
 }
 
 func (g *ForgeToML) HandlePullRequest(
-	event *models.ForgeEvent, git *GitMirror, forge models.Forge,
-	project string,
+	event *models.ForgeEvent, forge models.Forge, project string,
 ) error {
-	if err := git.EnsureMirror(); err != nil {
+	if err := g.git.EnsureMirror(); err != nil {
 		return err
 	}
-	if err := git.Fetch(); err != nil {
+	if err := g.git.Fetch(); err != nil {
 		return err
 	}
 
@@ -169,11 +168,11 @@ func (g *ForgeToML) HandlePullRequest(
 	if err != nil {
 		return err
 	}
-	if err := git.AddWorktree(event.PRHead, workdir); err != nil {
+	if err := g.git.AddWorktree(event.PRHead, workdir); err != nil {
 		os.RemoveAll(workdir)
 		return err
 	}
-	defer func() { _ = git.DelWorktree(workdir) }()
+	defer func() { _ = g.git.DelWorktree(workdir) }()
 
 	version := 1
 	var inReplyTo string
@@ -182,7 +181,7 @@ func (g *ForgeToML) HandlePullRequest(
 	}
 
 	prURL := forge.PRRef(event.PRNumber)
-	return git.SendPatches(
+	return g.git.SendPatches(
 		workdir, event.PRBase,
 		event.PRTitle, sanitizePRBody(event.PRBody),
 		event.PRBefore, inReplyTo, version,
@@ -265,46 +264,13 @@ func sanitizePRBody(body string) string {
 }
 
 func (g *ForgeToML) senderAddress(user models.ForgeUser) string {
+	name, email := g.git.smtp.ParseFrom()
 	switch {
 	case user.Email != "" && user.Name != "":
 		return fmt.Sprintf("%s <%s>", user.Name, user.Email)
 	case user.Email != "":
 		return fmt.Sprintf("%s <%s>", user.Login, user.Email)
 	default:
-		name, email := g.smtp.ParseFrom()
 		return fmt.Sprintf("%s (via %s) <%s>", user.Login, name, email)
 	}
-}
-
-const EventHeader = "X-PWForge-Event"
-
-func (g *ForgeToML) sendEmail(from, subject, body, inReplyTo string, extraHeaders ...string) error {
-	msg := &strings.Builder{}
-	fmt.Fprintf(msg, "From: %s\r\n", from)
-	fmt.Fprintf(msg, "To: %s\r\n", g.smtp.To)
-	fmt.Fprintf(msg, "Subject: %s\r\n", subject)
-	if inReplyTo != "" {
-		if !strings.HasPrefix(inReplyTo, "<") {
-			inReplyTo = "<" + inReplyTo + ">"
-		}
-		fmt.Fprintf(msg, "In-Reply-To: %s\r\n", inReplyTo)
-		fmt.Fprintf(msg, "References: %s\r\n", inReplyTo)
-	}
-	for _, h := range extraHeaders {
-		fmt.Fprintf(msg, "%s\r\n", h)
-	}
-	fmt.Fprintf(msg, "Content-Type: text/plain; charset=utf-8\r\n")
-	fmt.Fprintf(msg, "\r\n")
-	fmt.Fprintf(msg, "%s\r\n", body)
-
-	addr := fmt.Sprintf("%s:%d", g.smtp.Host, g.smtp.Port)
-
-	var auth smtp.Auth
-	if g.smtp.Username != "" {
-		auth = smtp.PlainAuth("", g.smtp.Username, g.smtp.Password, g.smtp.Host)
-	}
-
-	log.Printf("sending email: %s -> %s (reply-to: %s)", from, g.smtp.To, inReplyTo)
-
-	return smtp.SendMail(addr, auth, g.smtp.From, []string{g.smtp.To}, []byte(msg.String()))
 }

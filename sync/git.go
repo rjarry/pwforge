@@ -151,6 +151,46 @@ func (m *GitMirror) SendPatches(
 	return nil
 }
 
+func (m *GitMirror) SendEmail(
+	from, subject, body, inReplyTo string, extraHeaders ...string,
+) error {
+	log.Printf("sending email: %s -> %s (in-reply-to: %s): %s",
+		from, m.smtp.To, inReplyTo, subject)
+
+	tmpFile, err := os.CreateTemp("", "pwforge-email-*.eml")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// write custom headers + body to the file
+	// git send-email handles From/To/Subject/In-Reply-To via CLI args
+	var msg strings.Builder
+	for _, h := range extraHeaders {
+		fmt.Fprintf(&msg, "%s\n", h)
+	}
+	fmt.Fprintf(&msg, "\n%s\n", strings.TrimSpace(body))
+
+	if _, err := tmpFile.WriteString(msg.String()); err != nil {
+		tmpFile.Close()
+		return err
+	}
+	tmpFile.Close()
+
+	args := []string{
+		"-C", m.conf.MirrorPath,
+		"send-email", "--force",
+		"--from=" + from,
+		"--subject=" + subject,
+	}
+	if inReplyTo != "" {
+		args = append(args, "--in-reply-to="+strings.Trim(inReplyTo, "<>"))
+	}
+	args = append(args, tmpFile.Name())
+
+	return m.git(args...)
+}
+
 func (m *GitMirror) refExists(workdir, ref string) bool {
 	cmd := m.gitCmd("-C", workdir, "cat-file", "-t", ref)
 	return cmd.Run() == nil
