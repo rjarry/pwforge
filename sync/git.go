@@ -76,7 +76,6 @@ func (m *GitMirror) EnsureMirror() error {
 		"user.name":                    fromName,
 		"user.email":                   fromEmail,
 		"sendemail.to":                 m.smtp.To,
-		"sendemail.from":               m.smtp.From,
 		"sendemail.smtpServer":         m.smtp.Host,
 		"sendemail.smtpServerPort":     strconv.Itoa(m.smtp.Port),
 		"sendemail.smtpEncryption":     m.smtp.Encryption,
@@ -86,7 +85,6 @@ func (m *GitMirror) EnsureMirror() error {
 		"sendemail.envelopesender":     "auto",
 		"sendemail.assume8bitEncoding": "UTF-8",
 		"sendemail.suppressCc":         "self",
-		"sendemail.suppressFrom":       "true",
 		"format.subjectPrefix":         m.conf.SubjectPrefix,
 		"format.coverFromDescription":  "subject",
 	}
