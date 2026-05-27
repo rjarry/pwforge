@@ -41,11 +41,11 @@ RUN mkdir -p /data && \
 # postfix configuration
 COPY postfix/main.cf /etc/postfix/main.cf
 COPY postfix/master.cf /etc/postfix/master.cf
-COPY postfix/aliases /etc/postfix/aliases
+COPY postfix/transport /etc/postfix/transport
 COPY postfix/header_checks /etc/postfix/header_checks
 COPY --chmod=755 patchwork/parsemail.sh /opt/patchwork/parsemail.sh
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
-RUN postalias /etc/postfix/aliases
+RUN postmap /etc/postfix/transport
 RUN mkdir -p /root/Maildir/INBOX/{new,cur,tmp}
 
 EXPOSE 8888 587
