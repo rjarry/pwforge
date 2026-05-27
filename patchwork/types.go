@@ -123,6 +123,7 @@ type Cover struct {
 	Name      string                 `json:"name"`
 	Submitter Person                 `json:"submitter"`
 	Mbox      string                 `json:"mbox"`
+	Series    []PatchSummary         `json:"series"`
 	Content   string                 `json:"content"`
 	Headers   map[string]interface{} `json:"headers"`
 }
