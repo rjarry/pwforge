@@ -167,14 +167,15 @@ func (g *GitHub) ParseWebhook(r *http.Request) (*models.ForgeEvent, error) {
 	}
 
 	eventType := r.Header.Get("X-GitHub-Event")
+	log.Printf("github webhook: %s (%d bytes)", eventType, len(body))
 
 	switch eventType {
 	case "issue_comment":
 		return g.parseIssueComment(body)
 	case "pull_request_review_comment":
 		return g.parseReviewComment(body)
-	case "check_run":
-		return g.parseCheckRun(body)
+	case "check_suite":
+		return g.parseCheckSuite(body)
 	case "pull_request":
 		return g.parsePullRequest(body)
 	default:
@@ -236,30 +237,48 @@ func (g *GitHub) parseReviewComment(body []byte) (*models.ForgeEvent, error) {
 	}, nil
 }
 
-func (g *GitHub) parseCheckRun(body []byte) (*models.ForgeEvent, error) {
-	var payload gh.CheckRunEvent
+func (g *GitHub) parseCheckSuite(body []byte) (*models.ForgeEvent, error) {
+	var payload gh.CheckSuiteEvent
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("parse check_run: %w", err)
+		return nil, fmt.Errorf("parse check_suite: %w", err)
 	}
 	if payload.GetAction() != "completed" {
 		return nil, nil
 	}
-	run := payload.GetCheckRun()
-	prs := run.PullRequests
+	suite := payload.GetCheckSuite()
+	prs := suite.PullRequests
 	if len(prs) == 0 {
 		return nil, nil
 	}
-	var desc string
-	if output := run.GetOutput(); output != nil {
-		desc = output.GetSummary()
+
+	// fetch individual check runs for this suite
+	runs, _, err := g.client.Checks.ListCheckRunsCheckSuite(
+		context.Background(), g.owner, g.repo,
+		suite.GetID(), nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list check runs: %w", err)
 	}
+
+	var desc strings.Builder
+	for _, run := range runs.CheckRuns {
+		status := run.GetConclusion()
+		if status == "" {
+			status = run.GetStatus()
+		}
+		fmt.Fprintf(&desc, "%s %s", run.GetName(), status)
+		if url := run.GetHTMLURL(); url != "" {
+			fmt.Fprintf(&desc, ": %s", url)
+		}
+		desc.WriteString("\n")
+	}
+
 	return &models.ForgeEvent{
 		Type:        "check",
 		PRNumber:    prs[0].GetNumber(),
-		CheckName:   run.GetName(),
-		CheckStatus: run.GetConclusion(),
-		CheckURL:    run.GetHTMLURL(),
-		CheckDesc:   desc,
+		CheckName:   suite.GetApp().GetName(),
+		CheckStatus: suite.GetConclusion(),
+		CheckDesc:   desc.String(),
 	}, nil
 }
 

@@ -80,13 +80,9 @@ func (g *ForgeToML) HandleCheckEvent(
 	subject := "Re: " + series.Name
 
 	var body strings.Builder
-	fmt.Fprintf(&body, "CI check %q %s", event.CheckName, event.CheckStatus)
-	if event.CheckURL != "" {
-		fmt.Fprintf(&body, ": %s", event.CheckURL)
-	}
-	body.WriteString("\n")
+	fmt.Fprintf(&body, "CI: %s %s\n", event.CheckName, event.CheckStatus)
 	if event.CheckDesc != "" {
-		fmt.Fprintf(&body, "\n%s\n", event.CheckDesc)
+		fmt.Fprintf(&body, "\n%s", event.CheckDesc)
 	}
 
 	return g.sendEmail(g.smtp.From, subject, body.String(), replyTo)
