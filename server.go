@@ -174,6 +174,7 @@ func (s *Server) handleForgeEvent(event *models.ForgeEvent) {
 		}
 		if err := s.forgeToML.HandlePullRequest(
 			event, s.mlToForge.Git(), s.forge,
+			s.conf.Patchwork.Project,
 		); err != nil {
 			log.Printf("pull_request error: %v", err)
 		}

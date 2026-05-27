@@ -112,6 +112,7 @@ func (g *ForgeToML) replyToMsgID(series *patchwork.Series, filePath string) stri
 
 func (g *ForgeToML) HandlePullRequest(
 	event *models.ForgeEvent, git *GitMirror, forge models.Forge,
+	project string,
 ) error {
 	if err := git.EnsureMirror(); err != nil {
 		return err
@@ -133,7 +134,7 @@ func (g *ForgeToML) HandlePullRequest(
 	version := 1
 	var inReplyTo string
 	if event.PRAction == "synchronize" {
-		version, inReplyTo = g.nextVersionAndReplyTo(event, forge)
+		version, inReplyTo = g.nextVersionAndReplyTo(event, forge, project)
 	}
 
 	prURL := forge.PRRef(event.PRNumber)
@@ -147,10 +148,10 @@ func (g *ForgeToML) HandlePullRequest(
 }
 
 func (g *ForgeToML) nextVersionAndReplyTo(
-	event *models.ForgeEvent, forge models.Forge,
+	event *models.ForgeEvent, forge models.Forge, project string,
 ) (int, string) {
 	prRef := forge.PRRef(event.PRNumber)
-	matches, err := g.pw.FindSeriesByMetadata("", forge.MetaKeyPR(), prRef)
+	matches, err := g.pw.FindSeriesByMetadata(project, forge.MetaKeyPR(), prRef)
 	if err != nil || len(matches) == 0 {
 		return 1, ""
 	}
