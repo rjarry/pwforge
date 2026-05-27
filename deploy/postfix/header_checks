@@ -1,0 +1,2 @@
+# /^X-PWForge-PR:.*github.com\/rjarry\/pwforge\/.*/ PREPEND List-Id: <pwforge.example.com>
+# /^To:.*pwforge@patches\.example\.com/ PREPEND List-Id: <pwforge.example.com>

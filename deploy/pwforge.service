@@ -1,0 +1,21 @@
+[Unit]
+Description=Pwforge ML-forge sync bridge
+After=patchwork.service network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pwforge -syslog
+Restart=on-failure
+RestartSec=5
+User=www-data
+Group=www-data
+CacheDirectory=pwforge
+StateDirectory=pwforge
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/pwforge
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,2 @@
+# Route mail for the subscribed address to patchwork
+patches.example.com	patchwork:
