@@ -372,6 +372,10 @@ func (m *MLToForge) HandleCommentCreated(event *patchwork.Event) error {
 			}
 		}
 	} else if c := event.Payload.Cover; c != nil {
+		cover, err := m.pw.GetCover(c.ID)
+		if err != nil {
+			return fmt.Errorf("get cover %d: %w", c.ID, err)
+		}
 		comments, err := m.pw.GetCoverComments(c.ID)
 		if err != nil || len(comments) == 0 {
 			return fmt.Errorf("get comments for cover %d: %w", c.ID, err)
@@ -380,6 +384,9 @@ func (m *MLToForge) HandleCommentCreated(event *patchwork.Event) error {
 		commentBody = last.Content
 		commentAuthor = fmt.Sprintf("%s <%s>",
 			last.Submitter.Name, last.Submitter.Email)
+		if len(cover.Series) > 0 {
+			seriesID = cover.Series[0].ID
+		}
 	}
 
 	if seriesID == 0 {
