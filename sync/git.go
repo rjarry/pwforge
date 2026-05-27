@@ -136,7 +136,7 @@ func (m *GitMirror) SendPatches(
 			"--description-file="+descFile)
 	}
 
-	if previousRef != "" {
+	if previousRef != "" && m.refExists(workdir, previousRef) {
 		args = append(args, "--range-diff="+base+".."+previousRef)
 	}
 
@@ -149,6 +149,11 @@ func (m *GitMirror) SendPatches(
 		return fmt.Errorf("%s: %w", strings.Join(cmd.Args, " "), err)
 	}
 	return nil
+}
+
+func (m *GitMirror) refExists(workdir, ref string) bool {
+	cmd := m.gitCmd("-C", workdir, "cat-file", "-t", ref)
+	return cmd.Run() == nil
 }
 
 func (m *GitMirror) commitCount(workdir, base string) (int, error) {
