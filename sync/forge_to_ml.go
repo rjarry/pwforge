@@ -146,6 +146,7 @@ func (g *ForgeToML) HandlePullRequest(
 		event.PRTitle, sanitizePRBody(event.PRBody),
 		event.PRBefore, inReplyTo, version,
 		PRHeader+": "+prURL,
+		BranchHeader+": "+event.PRHeadBranch,
 	)
 }
 
@@ -177,6 +178,7 @@ func (g *ForgeToML) nextVersionAndReplyTo(
 }
 
 const PRHeader = "X-PWForge-PR"
+const BranchHeader = "X-PWForge-Branch"
 
 var htmlCommentRe = regexp.MustCompile(`(?s)<!--.*?-->`)
 
