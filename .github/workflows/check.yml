@@ -44,7 +44,10 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: git rebase -x "make lint" "HEAD~${{ github.event.pull_request.commits }}"
+      - run: |
+          set -xe
+          git rebase --exec "git --no-pager log --oneline -1" \
+            --exec "make lint" "HEAD~${{ github.event.pull_request.commits }}"
         if: ${{ github.event.pull_request.commits }}
       - run: make lint
         if: ${{ ! github.event.pull_request.commits }}
