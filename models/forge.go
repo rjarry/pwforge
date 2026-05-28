@@ -78,25 +78,39 @@ type WebhookParserFactory func(conf *config.Config) (WebhookParser, error)
 
 type RepoResolver func(rawURL string) (owner, repo string, ok bool)
 
+type SetupHandlerFactory func(conf *config.Config) http.Handler
+
 type forgeType struct {
-	newForge    ForgeConstructor
-	newParser   WebhookParserFactory
-	resolveRepo RepoResolver
+	newForge     ForgeConstructor
+	newParser    WebhookParserFactory
+	resolveRepo  RepoResolver
+	setupHandler SetupHandlerFactory
 }
 
 var forges = make(map[string]*forgeType)
+
+type ForgeOption func(*forgeType)
+
+func WithSetupHandler(f SetupHandlerFactory) ForgeOption {
+	return func(ft *forgeType) { ft.setupHandler = f }
+}
 
 func RegisterForge(
 	name string,
 	c ForgeConstructor,
 	p WebhookParserFactory,
 	r RepoResolver,
+	opts ...ForgeOption,
 ) {
-	forges[name] = &forgeType{
+	ft := &forgeType{
 		newForge:    c,
 		newParser:   p,
 		resolveRepo: r,
 	}
+	for _, opt := range opts {
+		opt(ft)
+	}
+	forges[name] = ft
 }
 
 func NewForge(conf *config.Config, project *config.ProjectConfig) (Forge, error) {
@@ -121,4 +135,12 @@ func ResolveRepo(forge, rawURL string) (owner, repo string, ok bool) {
 		return "", "", false
 	}
 	return ft.resolveRepo(rawURL)
+}
+
+func NewSetupHandler(conf *config.Config) http.Handler {
+	ft, found := forges[conf.Forge]
+	if !found || ft.setupHandler == nil {
+		return nil
+	}
+	return ft.setupHandler(conf)
 }

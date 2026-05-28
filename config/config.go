@@ -12,7 +12,9 @@ import (
 )
 
 type Config struct {
+	Path      string          `ini:"-"`
 	Listen    string          `ini:"listen"`
+	BaseURL   string          `ini:"base-url"`
 	Forge     string          `ini:"forge"`
 	QueueSize int             `ini:"queue-size"`
 	Patchwork PatchworkConfig `ini:"patchwork"`
@@ -105,6 +107,8 @@ func LoadConfig(path string) (*Config, error) {
 		},
 		Projects: make(map[string]*ProjectConfig),
 	}
+
+	cfg.Path = path
 
 	if path != "" {
 		f, err := ini.Load(path)

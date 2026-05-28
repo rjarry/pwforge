@@ -21,7 +21,7 @@ import (
 func main() {
 	var configPath string
 	var syslog bool
-	flag.StringVar(&configPath, "config", "", "path to config file")
+	flag.StringVar(&configPath, "config", "/etc/pwforge/config.ini", "path to config file")
 	flag.BoolVar(&syslog, "syslog", false, "log to syslog")
 	flag.Parse()
 

@@ -86,7 +86,8 @@ func New(conf *config.Config, project *config.ProjectConfig) (models.Forge, erro
 }
 
 func init() {
-	models.RegisterForge("github", New, newWebhookParser, resolveRepo)
+	models.RegisterForge("github", New, newWebhookParser, resolveRepo,
+		models.WithSetupHandler(SetupHandler))
 }
 
 func (g *GitHub) BaseBranch() (string, error) {

@@ -55,6 +55,9 @@ func NewServer(conf *config.Config) (net.Listener, *Server, error) {
 	}
 	s.mux.HandleFunc("POST /patchwork", s.handlePatchwork)
 	s.mux.HandleFunc("POST /forge", s.handleForge)
+	if h := models.NewSetupHandler(conf); h != nil {
+		s.mux.Handle("/", h)
+	}
 	s.Handler = s.mux
 	s.Addr = conf.Listen
 
