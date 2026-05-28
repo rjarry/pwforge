@@ -34,6 +34,11 @@ func main() {
 		Fatalf("config: %v", err)
 	}
 
+	err = CheckGitCommands(&conf.SMTP)
+	if err != nil {
+		Fatalf("%v", err)
+	}
+
 	// Subscribe to signals for graceful shutdown.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)

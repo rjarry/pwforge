@@ -21,6 +21,64 @@ type GitMirror struct {
 	forge models.Forge
 }
 
+func CheckGitCommands(smtp *config.SMTPConfig) error {
+	tmp, err := os.CreateTemp("", "pwforge-send-email-test-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err = tmp.WriteString("Subject: foo\n\nbar"); err != nil {
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+
+	args := []string{
+		"send-email",
+		"--dry-run",
+		"--from=" + smtp.From,
+		"--to=pwforge@users.noreply.github.com",
+		"--smtp-server=" + smtp.Host,
+		"--smtp-server-port=" + strconv.Itoa(smtp.Port),
+		"--smtp-encryption=" + smtp.Encryption,
+		"--confirm=never",
+		"--no-validate",
+		"--dry-run",
+		"--envelope-sender=auto",
+		"--8bit-encoding=UTF-8",
+		"--suppress-cc=all",
+	}
+	if smtp.Auth != "" {
+		args = append(args, "--smtp-auth="+smtp.Auth)
+	}
+	if smtp.Username != "" {
+		args = append(args, "--smtp-user="+smtp.Username)
+	}
+	if smtp.Password != "" {
+		args = append(args, "--smtp-pass="+smtp.Password)
+	}
+	args = append(args, tmp.Name())
+
+	name, email := smtp.ParseFrom()
+	cmd := exec.Command("git", args...)
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_COMMITTER_NAME="+name,
+		"GIT_COMMITTER_EMAIL="+email,
+		"GIT_AUTHOR_NAME="+name,
+		"GIT_AUTHOR_EMAIL="+email,
+		"GIT_TERMINAL_PROMPT=0",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git send-email: %w\n%s", err, out)
+	}
+
+	return nil
+}
+
 func NewGitMirror(conf *config.GitConfig, smtp *config.SMTPConfig, forge models.Forge) *GitMirror {
 	return &GitMirror{conf: conf, smtp: smtp, forge: forge}
 }
