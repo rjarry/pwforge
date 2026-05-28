@@ -1,7 +1,7 @@
-From 048a119420bedc713fc58b24ee5fe54b473bf475 Mon Sep 17 00:00:00 2001
+From 369a5c3862438073beacb2db8a9284858f5eb551 Mon Sep 17 00:00:00 2001
 From: Robin Jarry <robin@jarry.cc>
 Date: Sun, 24 May 2026 19:09:48 +0200
-Subject: [PATCH 2/6] api: add webhook support for event delivery
+Subject: [PATCH 3/5] api: add webhook support for event delivery
 
 Allow project maintainers to register webhook URLs that receive HTTP
 POST notifications when patchwork events occur (patch created, series
@@ -12,26 +12,33 @@ event creation. Payloads are signed with HMAC-SHA256 using a
 per-webhook secret. The new endpoints are available under API v1.5
 at /api/1.5/projects/{id}/webhooks/.
 
+Register the Webhook model in the admin interface instead of building
+a custom web UI. The admin already provides CRUD, filtering and search
+out of the box.
+
 This is the first step towards enabling patchwork as a bridge between
 mailing list and code forge workflows.
 
 Signed-off-by: Robin Jarry <robin@jarry.cc>
 ---
- docs/api/schemas/v1.5/patchwork.yaml | 3245 ++++++++++++++++++++++++++
- patchwork/api/webhook.py             |   76 +
- patchwork/migrations/0049_webhook.py |   78 +
- patchwork/models.py                  |   42 +
- patchwork/signals.py                 |   27 +-
- patchwork/tests/api/test_webhook.py  |  251 ++
- patchwork/tests/utils.py             |   15 +
- patchwork/urls.py                    |   22 +-
- patchwork/webhooks.py                |   85 +
- 9 files changed, 3826 insertions(+), 15 deletions(-)
+ docs/api/schemas/v1.5/patchwork.yaml          | 3245 +++++++++++++++++
+ patchwork/admin.py                            |   51 +
+ patchwork/api/webhook.py                      |   76 +
+ patchwork/migrations/0049_webhook.py          |   78 +
+ patchwork/models.py                           |   42 +
+ patchwork/signals.py                          |   27 +-
+ patchwork/tests/api/test_webhook.py           |  251 ++
+ patchwork/tests/utils.py                      |   15 +
+ patchwork/urls.py                             |   22 +-
+ patchwork/webhooks.py                         |   88 +
+ .../webhook-support-a1b2c3d4e5f6g7h8.yaml     |   15 +
+ 11 files changed, 3895 insertions(+), 15 deletions(-)
  create mode 100644 docs/api/schemas/v1.5/patchwork.yaml
  create mode 100644 patchwork/api/webhook.py
  create mode 100644 patchwork/migrations/0049_webhook.py
  create mode 100644 patchwork/tests/api/test_webhook.py
  create mode 100644 patchwork/webhooks.py
+ create mode 100644 releasenotes/notes/webhook-support-a1b2c3d4e5f6g7h8.yaml
 
 diff --git a/docs/api/schemas/v1.5/patchwork.yaml b/docs/api/schemas/v1.5/patchwork.yaml
 new file mode 100644
@@ -3284,6 +3291,86 @@ index 000000000000..036fe15f1e81
 +    description: Check operations
 +  - name: events
 +    description: Event operations
+diff --git a/patchwork/admin.py b/patchwork/admin.py
+index d1c389a17b99..3ecf2280c5a5 100644
+--- a/patchwork/admin.py
++++ b/patchwork/admin.py
+@@ -3,6 +3,7 @@
+ #
+ # SPDX-License-Identifier: GPL-2.0-or-later
+ 
++from django import forms
+ from django.contrib import admin
+ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+ from django.contrib.auth.models import User
+@@ -13,6 +14,7 @@ from patchwork.models import Check
+ from patchwork.models import Cover
+ from patchwork.models import CoverComment
+ from patchwork.models import DelegationRule
++from patchwork.models import Event
+ from patchwork.models import Patch
+ from patchwork.models import PatchComment
+ from patchwork.models import PatchRelation
+@@ -23,6 +25,7 @@ from patchwork.models import SeriesReference
+ from patchwork.models import State
+ from patchwork.models import Tag
+ from patchwork.models import UserProfile
++from patchwork.models import Webhook
+ 
+ 
+ class UserProfileInline(admin.StackedInline):
+@@ -219,3 +222,51 @@ class PatchRelationAdmin(admin.ModelAdmin):
+ 
+ 
+ admin.site.register(PatchRelation, PatchRelationAdmin)
++
++
++class WebhookForm(forms.ModelForm):
++    ALL_EVENTS = '*'
++
++    event_select = forms.MultipleChoiceField(
++        choices=Event.CATEGORY_CHOICES,
++        widget=forms.CheckboxSelectMultiple,
++        required=False,
++        label='Events',
++        help_text='Select which events trigger this webhook. '
++        'Leave empty to receive all events.',
++    )
++
++    class Meta:
++        model = Webhook
++        fields = ('project', 'url', 'secret', 'active')
++
++    def __init__(self, *args, **kwargs):
++        super().__init__(*args, **kwargs)
++        if self.instance.pk:
++            events = self.instance.events
++            if events != self.ALL_EVENTS:
++                self.initial['event_select'] = events.split(',')
++
++    def save(self, commit=True):
++        selected = self.cleaned_data.get('event_select', [])
++        if selected:
++            self.instance.events = ','.join(selected)
++        else:
++            self.instance.events = self.ALL_EVENTS
++        return super().save(commit)
++
++
++class WebhookAdmin(admin.ModelAdmin):
++    form = WebhookForm
++    list_display = ('project', 'url', 'events', 'active', 'creator', 'created')
++    list_filter = ('project', 'active')
++    search_fields = ('url', 'project__name')
++    readonly_fields = ('created',)
++
++    def save_model(self, request, obj, form, change):
++        if not change:
++            obj.creator = request.user
++        super().save_model(request, obj, form, change)
++
++
++admin.site.register(Webhook, WebhookAdmin)
 diff --git a/patchwork/api/webhook.py b/patchwork/api/webhook.py
 new file mode 100644
 index 000000000000..7ee2c5a601c2
@@ -3963,10 +4050,10 @@ index 11cd8e7c152a..afa5e3c47666 100644
              'user/generate-token/',
 diff --git a/patchwork/webhooks.py b/patchwork/webhooks.py
 new file mode 100644
-index 000000000000..e32239f28399
+index 000000000000..9dd194eb07b4
 --- /dev/null
 +++ b/patchwork/webhooks.py
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,88 @@
 +# Patchwork - automated patch tracking system
 +# Copyright (C) 2026 Robin Jarry <robin@jarry.cc>
 +#
@@ -3990,11 +4077,14 @@ index 000000000000..e32239f28399
 +def _serialize_event(event):
 +    from patchwork.api.event import EventSerializer
 +
++    from django.conf import settings
++    from django.contrib.sites.models import Site
 +    from rest_framework.request import Request
 +    from rest_framework.test import APIRequestFactory
 +
-+    factory = APIRequestFactory()
-+    request = Request(factory.get('/'))
++    site = Site.objects.get_current()
++    factory = APIRequestFactory(SERVER_NAME=site.domain)
++    request = Request(factory.get('/', secure=settings.FORCE_HTTPS_LINKS))
 +    request.version = '1.5'
 +    serializer = EventSerializer(event, context={'request': request})
 +    return serializer.data
@@ -4052,6 +4142,27 @@ index 000000000000..e32239f28399
 +        logger.warning(
 +            'webhook delivery failed for event %r', event, exc_info=True
 +        )
+diff --git a/releasenotes/notes/webhook-support-a1b2c3d4e5f6g7h8.yaml b/releasenotes/notes/webhook-support-a1b2c3d4e5f6g7h8.yaml
+new file mode 100644
+index 000000000000..c2bbae1058ad
+--- /dev/null
++++ b/releasenotes/notes/webhook-support-a1b2c3d4e5f6g7h8.yaml
+@@ -0,0 +1,15 @@
++---
++features:
++  - |
++    Webhook support for event delivery. Projects can now have webhooks
++    configured via the Django admin interface. When events occur (patch
++    created, series completed, state changed, etc.), patchwork will POST
++    a JSON payload to each matching webhook URL. Payloads can optionally
++    be signed with HMAC-SHA256 using a shared secret.
++api:
++  - |
++    The API version has been updated to v1.5.
++  - |
++    Add webhook management endpoints under
++    ``/api/projects/<id>/webhooks/``. Webhooks can be filtered by event
++    category and secured with a shared secret for payload signing.
 -- 
 2.54.0
 

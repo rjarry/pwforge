@@ -1,7 +1,7 @@
-From 0058cf3a9eaf4d3497e748f1c3a7f1c911d1e230 Mon Sep 17 00:00:00 2001
+From 54cac31e23670e05b3b9147df02c202d438eda96 Mon Sep 17 00:00:00 2001
 From: Robin Jarry <robin@jarry.cc>
 Date: Tue, 26 May 2026 15:28:19 +0200
-Subject: [PATCH 6/6] series: add respin tracking for patch series versions
+Subject: [PATCH 5/5] series: add respin tracking for patch series versions
 
 When a new version of a patch series is received (e.g. [PATCH v3]),
 automatically link it to the previous version via a new previous_series
@@ -30,15 +30,17 @@ patch and cover letter detail pages with links to all versions.
 Signed-off-by: Robin Jarry <rjarry@redhat.com>
 ---
  patchwork/api/series.py                       |  15 +-
- .../migrations/0051_series_respin_tracking.py |  33 ++++
+ .../migrations/0051_series_respin_tracking.py |  33 +++++
  patchwork/models.py                           |  34 +++++
- patchwork/parser.py                           | 141 ++++++++++++++++++
+ patchwork/parser.py                           | 139 ++++++++++++++++++
  patchwork/templates/patchwork/submission.html |  15 ++
  patchwork/tests/api/test_series.py            |   2 +-
  patchwork/views/cover.py                      |   3 +
  patchwork/views/patch.py                      |   2 +
- 8 files changed, 242 insertions(+), 3 deletions(-)
+ ...ries-respin-tracking-c3d4e5f6g7h8i9j0.yaml |  16 ++
+ 9 files changed, 256 insertions(+), 3 deletions(-)
  create mode 100644 patchwork/migrations/0051_series_respin_tracking.py
+ create mode 100644 releasenotes/notes/series-respin-tracking-c3d4e5f6g7h8i9j0.yaml
 
 diff --git a/patchwork/api/series.py b/patchwork/api/series.py
 index e58d276d8146..d7cc7513f172 100644
@@ -191,7 +193,7 @@ index 37b90a74bf6c..1b8a1476d64e 100644
          if not user.is_authenticated:
              return False
 diff --git a/patchwork/parser.py b/patchwork/parser.py
-index c33ada8d7d42..baba4828f5d2 100644
+index fafa47ba9e78..13d043069944 100644
 --- a/patchwork/parser.py
 +++ b/patchwork/parser.py
 @@ -6,6 +6,7 @@
@@ -202,7 +204,7 @@ index c33ada8d7d42..baba4828f5d2 100644
  from email.header import decode_header
  from email.header import make_header
  from email.utils import mktime_tz
-@@ -335,6 +336,128 @@ def find_series(project, mail, author):
+@@ -335,6 +336,126 @@ def find_series(project, mail, author):
      return _find_series_by_markers(project, mail, author)
  
  
@@ -263,9 +265,7 @@ index c33ada8d7d42..baba4828f5d2 100644
 +    # the version chain to find version N-1
 +    for ref in refs:
 +        try:
-+            sr = SeriesReference.objects.get(
-+                msgid=ref[:255], project=project
-+            )
++            sr = SeriesReference.objects.get(msgid=ref[:255], project=project)
 +        except SeriesReference.DoesNotExist:
 +            continue
 +        linked = sr.series
@@ -331,7 +331,7 @@ index c33ada8d7d42..baba4828f5d2 100644
  def split_from_header(from_header):
      name, email = (None, None)
  
-@@ -1391,6 +1514,15 @@ def parse_mail(mail, list_id=None):
+@@ -1389,6 +1510,15 @@ def parse_mail(mail, list_id=None):
          # parse patch dependencies
          series.add_dependencies(parse_depends_on(message))
  
@@ -347,7 +347,7 @@ index c33ada8d7d42..baba4828f5d2 100644
          return patch
      elif x == 0:  # (potential) cover letters
          # if refs are empty, it's implicitly a cover letter. If not,
-@@ -1462,6 +1594,15 @@ def parse_mail(mail, list_id=None):
+@@ -1460,6 +1590,15 @@ def parse_mail(mail, list_id=None):
              # entire patch series; parse them
              series.add_dependencies(parse_depends_on(message))
  
@@ -364,7 +364,7 @@ index c33ada8d7d42..baba4828f5d2 100644
  
      # comments
 diff --git a/patchwork/templates/patchwork/submission.html b/patchwork/templates/patchwork/submission.html
-index bcf36c1c6cac..38b0de30873d 100644
+index 7be7f1966d80..4cec9799b946 100644
 --- a/patchwork/templates/patchwork/submission.html
 +++ b/patchwork/templates/patchwork/submission.html
 @@ -97,6 +97,21 @@
@@ -429,6 +429,28 @@ index efe94f17c942..fd36bf98461d 100644
      if errors:
          context['errors'] = errors
  
+diff --git a/releasenotes/notes/series-respin-tracking-c3d4e5f6g7h8i9j0.yaml b/releasenotes/notes/series-respin-tracking-c3d4e5f6g7h8i9j0.yaml
+new file mode 100644
+index 000000000000..1d3d99bbf517
+--- /dev/null
++++ b/releasenotes/notes/series-respin-tracking-c3d4e5f6g7h8i9j0.yaml
+@@ -0,0 +1,16 @@
++---
++features:
++  - |
++    Automatic respin tracking for patch series versions. When a new
++    version of a series is received (e.g. [PATCH v3]), patchwork links
++    it to the previous version using In-Reply-To/References headers or
++    name similarity matching. The patch detail page shows all versions
++    with links to navigate between them.
++  - |
++    New per-project ``auto_supersede`` option. When enabled, receiving a
++    new series version automatically marks all patches of the previous
++    version as superseded.
++api:
++  - |
++    Add ``previous_series`` and ``next_series`` fields to the series
++    endpoint (v1.5) for navigating between series versions.
 -- 
 2.54.0
 
