@@ -14,6 +14,7 @@ const CommentMarker = "<!-- pwforge -->"
 
 type ForgeEvent struct {
 	Type           string // "issue_comment", "review_comment", "check", "pull_request"
+	RepoKey        string
 	PRNumber       int
 	Author         ForgeUser
 	Body           string
@@ -66,21 +67,80 @@ type Forge interface {
 	PRRefSpec(prNumber int) string
 	CreatePR(title, body, head, base string) (int, error)
 	PostComment(prNumber int, body string) error
-	ParseWebhook(r *http.Request) (*ForgeEvent, error)
+	RepoKey() string
 }
 
-type ForgeConstructor func(*config.Config) (Forge, error)
+type ForgeConstructor func(conf *config.Config, project *config.ProjectConfig) (Forge, error)
 
-var forges = make(map[string]ForgeConstructor)
+type WebhookParser func(body []byte, headers http.Header) (*ForgeEvent, error)
 
-func RegisterForge(name string, c ForgeConstructor) {
-	forges[name] = c
+type WebhookParserFactory func(conf *config.Config) (WebhookParser, error)
+
+type RepoResolver func(rawURL string) (owner, repo string, ok bool)
+
+type SetupHandlerFactory func(conf *config.Config) http.Handler
+
+type forgeType struct {
+	newForge     ForgeConstructor
+	newParser    WebhookParserFactory
+	resolveRepo  RepoResolver
+	setupHandler SetupHandlerFactory
 }
 
-func NewForge(conf *config.Config) (Forge, error) {
-	ctor, found := forges[conf.Forge]
+var forges = make(map[string]*forgeType)
+
+type ForgeOption func(*forgeType)
+
+func WithSetupHandler(f SetupHandlerFactory) ForgeOption {
+	return func(ft *forgeType) { ft.setupHandler = f }
+}
+
+func RegisterForge(
+	name string,
+	c ForgeConstructor,
+	p WebhookParserFactory,
+	r RepoResolver,
+	opts ...ForgeOption,
+) {
+	ft := &forgeType{
+		newForge:    c,
+		newParser:   p,
+		resolveRepo: r,
+	}
+	for _, opt := range opts {
+		opt(ft)
+	}
+	forges[name] = ft
+}
+
+func NewForge(conf *config.Config, project *config.ProjectConfig) (Forge, error) {
+	ft, found := forges[conf.Forge]
 	if !found {
 		return nil, fmt.Errorf("unknown forge %q", conf.Forge)
 	}
-	return ctor(conf)
+	return ft.newForge(conf, project)
+}
+
+func NewWebhookParser(conf *config.Config) (WebhookParser, error) {
+	ft, found := forges[conf.Forge]
+	if !found {
+		return nil, fmt.Errorf("unknown forge %q", conf.Forge)
+	}
+	return ft.newParser(conf)
+}
+
+func ResolveRepo(forge, rawURL string) (owner, repo string, ok bool) {
+	ft, found := forges[forge]
+	if !found {
+		return "", "", false
+	}
+	return ft.resolveRepo(rawURL)
+}
+
+func NewSetupHandler(conf *config.Config) http.Handler {
+	ft, found := forges[conf.Forge]
+	if !found || ft.setupHandler == nil {
+		return nil
+	}
+	return ft.setupHandler(conf)
 }

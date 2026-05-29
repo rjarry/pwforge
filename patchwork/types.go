@@ -51,11 +51,14 @@ type User struct {
 }
 
 type Project struct {
-	ID       int    `json:"id"`
-	URL      string `json:"url"`
-	Name     string `json:"name"`
-	LinkName string `json:"link_name"`
-	ListID   string `json:"list_id"`
+	ID        int    `json:"id"`
+	URL       string `json:"url"`
+	Name      string `json:"name"`
+	LinkName  string `json:"link_name"`
+	ListID    string `json:"list_id"`
+	ListEmail string `json:"list_email"`
+	WebURL    string `json:"web_url"`
+	ScmURL    string `json:"scm_url"`
 }
 
 type PatchSummary struct {

@@ -1,0 +1,94 @@
+From 6cea8e8950eb4f9f64c9016bca39e5f15cfc713d Mon Sep 17 00:00:00 2001
+From: Robin Jarry <robin@jarry.cc>
+Date: Fri, 29 May 2026 14:40:11 +0200
+Subject: [PATCH 2/5] parsemail: fix SeriesReference race with concurrent
+ delivery
+
+When multiple parsemail processes run in parallel (e.g. postfix
+delivering several messages from the same series at once), two
+processes can try to create a SeriesReference for the same msgid
+simultaneously. The second one fails with an IntegrityError:
+
+  django.db.utils.IntegrityError: duplicate key value violates
+  unique constraint "patchwork_seriesreference_project_id_msgid_..."
+  DETAIL: Key (project_id, msgid)=(2, <...>) already exists.
+
+This can result in incomplete series that never reach the
+"received_all" state because the failed parsemail invocation
+prevents one of the patches from being recorded.
+
+The existing get/create pattern has a classic TOCTOU race: the get
+succeeds (no reference found), but by the time create runs, another
+process has already inserted the row. Replace both the try/get/
+except/create block and the bare create call with get_or_create
+which handles the race atomically at the database level.
+
+Signed-off-by: Robin Jarry <robin@jarry.cc>
+---
+ patchwork/parser.py                           | 30 +++++++++----------
+ .../parsemail-race-fix-e5f6g7h8i9j0k1l2.yaml  |  5 ++++
+ 2 files changed, 19 insertions(+), 16 deletions(-)
+ create mode 100644 releasenotes/notes/parsemail-race-fix-e5f6g7h8i9j0k1l2.yaml
+
+diff --git a/patchwork/parser.py b/patchwork/parser.py
+index c33ada8d7d42..fafa47ba9e78 100644
+--- a/patchwork/parser.py
++++ b/patchwork/parser.py
+@@ -1336,20 +1336,18 @@ def parse_mail(mail, list_id=None):
+                         # later one.
+                         for ref in refs + [msgid]:
+                             ref = ref[:255]
+-                            # we don't want duplicates
+-                            try:
+-                                # we could have a ref to a previous series.
+-                                # (For example, a series sent in reply to
+-                                # another series.) That should not create a
+-                                # series ref for this series, so check for the
+-                                # msg-id only, not the msg-id/series pair.
+-                                SeriesReference.objects.get(
+-                                    msgid=ref, project=project
+-                                )
+-                            except SeriesReference.DoesNotExist:
+-                                SeriesReference.objects.create(
+-                                    msgid=ref, project=project, series=series
+-                                )
++                            # We could have a ref to a previous series. (For
++                            # example, a series sent in reply to another
++                            # series.) That should not create a series ref for
++                            # this series, so check for the msg-id only, not
++                            # the msg-id/series pair. Use get_or_create to
++                            # avoid races when multiple parsemail processes run
++                            # in parallel.
++                            SeriesReference.objects.get_or_create(
++                                msgid=ref,
++                                project=project,
++                                defaults={'series': series},
++                            )
+ 
+                         # attempt to pull the series in again, raising an
+                         # exception if we lost the race when creating a series
+@@ -1436,8 +1434,8 @@ def parse_mail(mail, list_id=None):
+                 # we don't save the in-reply-to or references fields
+                 # for a cover letter, as they can't refer to the same
+                 # series
+-                SeriesReference.objects.create(
+-                    msgid=msgid, project=project, series=series
++                SeriesReference.objects.get_or_create(
++                    msgid=msgid, project=project, defaults={'series': series}
+                 )
+ 
+             with transaction.atomic():
+diff --git a/releasenotes/notes/parsemail-race-fix-e5f6g7h8i9j0k1l2.yaml b/releasenotes/notes/parsemail-race-fix-e5f6g7h8i9j0k1l2.yaml
+new file mode 100644
+index 000000000000..f0869819538b
+--- /dev/null
++++ b/releasenotes/notes/parsemail-race-fix-e5f6g7h8i9j0k1l2.yaml
+@@ -0,0 +1,5 @@
++---
++fixes:
++  - |
++    Fix a race condition in SeriesReference creation during concurrent
++    email delivery.
+-- 
+2.54.0
+

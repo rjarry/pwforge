@@ -10,8 +10,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,17 +22,16 @@ import (
 )
 
 type GitHub struct {
-	client        *gh.Client
-	owner         string
-	repo          string
-	forkOwner     string
-	forkRepo      string
-	webhookSecret string
-	ts            *TokenSource
-	baseBranch    string
+	client     *gh.Client
+	owner      string
+	repo       string
+	forkOwner  string
+	forkRepo   string
+	ts         *TokenSource
+	baseBranch string
 }
 
-func New(conf *config.Config) (models.Forge, error) {
+func newClient(conf *config.Config) (*gh.Client, *TokenSource, error) {
 	var ts *TokenSource
 	var err error
 
@@ -45,46 +42,52 @@ func New(conf *config.Config) (models.Forge, error) {
 			conf.GitHub.PrivateKeyFile,
 		)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		log.Printf("using github app authentication (app-id=%d)",
-			conf.GitHub.AppID)
 	} else {
 		ts = NewTokenSourcePAT(conf.GitHub.Token)
-		log.Printf("using github personal access token authentication")
 	}
 
 	client := gh.NewClient(&http.Client{Transport: ts.Transport()})
 	if conf.GitHub.APIURL != "" {
 		u, err := url.Parse(conf.GitHub.APIURL)
 		if err != nil {
-			return nil, fmt.Errorf("parse api-url: %w", err)
+			return nil, nil, fmt.Errorf("parse api-url: %w", err)
 		}
 		client.BaseURL = u
 	}
 
-	forkOwner := conf.GitHub.ForkOwner
-	if forkOwner == "" {
-		forkOwner = conf.GitHub.Owner
+	return client, ts, nil
+}
+
+func New(conf *config.Config, project *config.ProjectConfig) (models.Forge, error) {
+	client, ts, err := newClient(conf)
+	if err != nil {
+		return nil, err
 	}
-	forkRepo := conf.GitHub.ForkRepo
+
+	forkOwner := project.ForkOwner
+	if forkOwner == "" {
+		forkOwner = project.Owner
+	}
+	forkRepo := project.ForkRepo
 	if forkRepo == "" {
-		forkRepo = conf.GitHub.Repo
+		forkRepo = project.Repo
 	}
 
 	return &GitHub{
-		client:        client,
-		owner:         conf.GitHub.Owner,
-		repo:          conf.GitHub.Repo,
-		forkOwner:     forkOwner,
-		forkRepo:      forkRepo,
-		webhookSecret: conf.GitHub.WebhookSecret,
-		ts:            ts,
+		client:    client,
+		owner:     project.Owner,
+		repo:      project.Repo,
+		forkOwner: forkOwner,
+		forkRepo:  forkRepo,
+		ts:        ts,
 	}, nil
 }
 
 func init() {
-	models.RegisterForge("github", New)
+	models.RegisterForge("github", New, newWebhookParser, resolveRepo,
+		models.WithSetupHandler(SetupHandler))
 }
 
 func (g *GitHub) BaseBranch() (string, error) {
@@ -114,6 +117,7 @@ func (g *GitHub) WriteCredentials(path string) error {
 	return os.WriteFile(path, []byte(line), 0o600)
 }
 
+func (g *GitHub) RepoKey() string       { return strings.ToLower(g.owner + "/" + g.repo) }
 func (g *GitHub) MetaKeyPR() string     { return "github_pr" }
 func (g *GitHub) MetaKeyBranch() string { return "github_branch" }
 
@@ -155,37 +159,58 @@ func (g *GitHub) PostComment(prNumber int, body string) error {
 	return err
 }
 
-func (g *GitHub) ParseWebhook(r *http.Request) (*models.ForgeEvent, error) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
+// webhookParser handles forge webhook parsing independently of any
+// specific project. It uses the shared API client and webhook secret.
+type webhookParser struct {
+	client *gh.Client
+	secret string
+}
 
-	sig := r.Header.Get("X-Hub-Signature-256")
-	if !g.verifySignature(body, sig) {
+func newWebhookParser(conf *config.Config) (models.WebhookParser, error) {
+	client, _, err := newClient(conf)
+	if err != nil {
+		return nil, err
+	}
+	p := &webhookParser{
+		client: client,
+		secret: conf.GitHub.WebhookSecret,
+	}
+	return p.parse, nil
+}
+
+func repoKey(payload interface{ GetRepo() *gh.Repository }) string {
+	repo := payload.GetRepo()
+	if repo == nil {
+		return ""
+	}
+	return strings.ToLower(repo.GetFullName())
+}
+
+func (p *webhookParser) parse(body []byte, headers http.Header) (*models.ForgeEvent, error) {
+	sig := headers.Get("X-Hub-Signature-256")
+	if !verifySignature(body, sig, p.secret) {
 		return nil, fmt.Errorf("invalid signature")
 	}
 
-	eventType := r.Header.Get("X-GitHub-Event")
-	log.Printf("github webhook: %s (%d bytes)", eventType, len(body))
+	eventType := headers.Get("X-GitHub-Event")
 
 	switch eventType {
 	case "issue_comment":
-		return g.parseIssueComment(body)
+		return p.parseIssueComment(body)
 	case "pull_request_review":
-		return g.parseReview(body)
+		return p.parseReview(body)
 	case "check_run":
-		return g.parseCheckRun(body)
+		return p.parseCheckRun(body)
 	case "check_suite":
-		return g.parseCheckSuite(body)
+		return p.parseCheckSuite(body)
 	case "pull_request":
-		return g.parsePullRequest(body)
+		return p.parsePullRequest(body)
 	default:
 		return nil, nil
 	}
 }
 
-func (g *GitHub) parseIssueComment(body []byte) (*models.ForgeEvent, error) {
+func (p *webhookParser) parseIssueComment(body []byte) (*models.ForgeEvent, error) {
 	var payload gh.IssueCommentEvent
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("parse issue_comment: %w", err)
@@ -202,6 +227,7 @@ func (g *GitHub) parseIssueComment(body []byte) (*models.ForgeEvent, error) {
 	user := payload.GetComment().GetUser()
 	return &models.ForgeEvent{
 		Type:     "issue_comment",
+		RepoKey:  repoKey(&payload),
 		PRNumber: payload.GetIssue().GetNumber(),
 		Author: models.ForgeUser{
 			Login: user.GetLogin(),
@@ -212,7 +238,7 @@ func (g *GitHub) parseIssueComment(body []byte) (*models.ForgeEvent, error) {
 	}, nil
 }
 
-func (g *GitHub) parseReview(body []byte) (*models.ForgeEvent, error) {
+func (p *webhookParser) parseReview(body []byte) (*models.ForgeEvent, error) {
 	var payload gh.PullRequestReviewEvent
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("parse pull_request_review: %w", err)
@@ -226,10 +252,11 @@ func (g *GitHub) parseReview(body []byte) (*models.ForgeEvent, error) {
 	}
 	user := review.GetUser()
 	pr := payload.GetPullRequest()
+	repo := payload.GetRepo()
 
-	// fetch all inline comments for this review
-	comments, _, err := g.client.PullRequests.ListReviewComments(
-		context.Background(), g.owner, g.repo,
+	comments, _, err := p.client.PullRequests.ListReviewComments(
+		context.Background(),
+		repo.GetOwner().GetLogin(), repo.GetName(),
 		pr.GetNumber(), review.GetID(), nil,
 	)
 	if err != nil {
@@ -247,6 +274,7 @@ func (g *GitHub) parseReview(body []byte) (*models.ForgeEvent, error) {
 
 	return &models.ForgeEvent{
 		Type:     "review",
+		RepoKey:  repoKey(&payload),
 		PRNumber: pr.GetNumber(),
 		Author: models.ForgeUser{
 			Login: user.GetLogin(),
@@ -259,7 +287,7 @@ func (g *GitHub) parseReview(body []byte) (*models.ForgeEvent, error) {
 	}, nil
 }
 
-func (g *GitHub) parseCheckRun(body []byte) (*models.ForgeEvent, error) {
+func (p *webhookParser) parseCheckRun(body []byte) (*models.ForgeEvent, error) {
 	var payload gh.CheckRunEvent
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("parse check_run: %w", err)
@@ -274,6 +302,7 @@ func (g *GitHub) parseCheckRun(body []byte) (*models.ForgeEvent, error) {
 	}
 	return &models.ForgeEvent{
 		Type:        "check_pending",
+		RepoKey:     repoKey(&payload),
 		PRNumber:    prs[0].GetNumber(),
 		CheckName:   run.GetName(),
 		CheckStatus: "pending",
@@ -281,7 +310,7 @@ func (g *GitHub) parseCheckRun(body []byte) (*models.ForgeEvent, error) {
 	}, nil
 }
 
-func (g *GitHub) parseCheckSuite(body []byte) (*models.ForgeEvent, error) {
+func (p *webhookParser) parseCheckSuite(body []byte) (*models.ForgeEvent, error) {
 	var payload gh.CheckSuiteEvent
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("parse check_suite: %w", err)
@@ -295,9 +324,10 @@ func (g *GitHub) parseCheckSuite(body []byte) (*models.ForgeEvent, error) {
 		return nil, nil
 	}
 
-	// fetch individual check runs for this suite
-	runs, _, err := g.client.Checks.ListCheckRunsCheckSuite(
-		context.Background(), g.owner, g.repo,
+	repo := payload.GetRepo()
+	runs, _, err := p.client.Checks.ListCheckRunsCheckSuite(
+		context.Background(),
+		repo.GetOwner().GetLogin(), repo.GetName(),
 		suite.GetID(), nil,
 	)
 	if err != nil {
@@ -330,6 +360,7 @@ func (g *GitHub) parseCheckSuite(body []byte) (*models.ForgeEvent, error) {
 
 	return &models.ForgeEvent{
 		Type:        "check",
+		RepoKey:     repoKey(&payload),
 		PRNumber:    prs[0].GetNumber(),
 		CheckName:   suite.GetApp().GetName(),
 		CheckStatus: suite.GetConclusion(),
@@ -338,7 +369,7 @@ func (g *GitHub) parseCheckSuite(body []byte) (*models.ForgeEvent, error) {
 	}, nil
 }
 
-func (g *GitHub) parsePullRequest(body []byte) (*models.ForgeEvent, error) {
+func (p *webhookParser) parsePullRequest(body []byte) (*models.ForgeEvent, error) {
 	var payload gh.PullRequestEvent
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("parse pull_request: %w", err)
@@ -351,6 +382,7 @@ func (g *GitHub) parsePullRequest(body []byte) (*models.ForgeEvent, error) {
 	user := pr.GetUser()
 	return &models.ForgeEvent{
 		Type:     "pull_request",
+		RepoKey:  repoKey(&payload),
 		PRNumber: pr.GetNumber(),
 		Author: models.ForgeUser{
 			Login: user.GetLogin(),
@@ -367,8 +399,8 @@ func (g *GitHub) parsePullRequest(body []byte) (*models.ForgeEvent, error) {
 	}, nil
 }
 
-func (g *GitHub) verifySignature(body []byte, signature string) bool {
-	if g.webhookSecret == "" {
+func verifySignature(body []byte, signature, secret string) bool {
+	if secret == "" {
 		return true
 	}
 	prefix := "sha256="
@@ -379,7 +411,26 @@ func (g *GitHub) verifySignature(body []byte, signature string) bool {
 	if err != nil {
 		return false
 	}
-	mac := hmac.New(sha256.New, []byte(g.webhookSecret))
+	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)
 	return hmac.Equal(sig, mac.Sum(nil))
+}
+
+func resolveRepo(rawURL string) (owner, repo string, ok bool) {
+	if rawURL == "" {
+		return "", "", false
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", "", false
+	}
+	if u.Host != "github.com" {
+		return "", "", false
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 2 {
+		return "", "", false
+	}
+	repo = strings.TrimSuffix(parts[1], ".git")
+	return parts[0], repo, true
 }

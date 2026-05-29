@@ -1,36 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Robin Jarry
 
-package sync
+package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 
-	"github.com/rjarry/pwforge/config"
 	"github.com/rjarry/pwforge/models"
 	"github.com/rjarry/pwforge/patchwork"
 )
 
 type MLToForge struct {
-	pw           *patchwork.Client
-	forge        models.Forge
-	git          *GitMirror
-	branchPrefix string
+	pw      *patchwork.Client
+	forge   models.Forge
+	git     *GitMirror
+	project string
 }
 
 func NewMLToForge(
-	pw *patchwork.Client, forge models.Forge, conf *config.Config,
+	pw *patchwork.Client,
+	forge models.Forge,
+	git *GitMirror,
+	project string,
 ) *MLToForge {
 	return &MLToForge{
-		pw:           pw,
-		forge:        forge,
-		git:          NewGitMirror(&conf.Git, &conf.SMTP, forge),
-		branchPrefix: conf.Git.BranchPrefix,
+		pw:      pw,
+		forge:   forge,
+		git:     git,
+		project: project,
 	}
 }
 
@@ -43,7 +44,7 @@ func (m *MLToForge) HandleSeriesCompleted(seriesID int) error {
 	}
 
 	if prRef, ok := series.Metadata[m.forge.MetaKeyPR()].(string); ok && prRef != "" {
-		log.Printf("series %d already has PR %s, skipping", seriesID, prRef)
+		Debugf("series %d already has PR %s, skipping", seriesID, prRef)
 		return nil
 	}
 
@@ -65,12 +66,12 @@ func (m *MLToForge) findPreviousPR(series *patchwork.Series) *patchwork.Series {
 	for prevURL != "" {
 		prevID, err := parseIDFromURL(prevURL)
 		if err != nil {
-			log.Printf("invalid previous_series URL %q: %v", prevURL, err)
+			Errorf("invalid previous_series URL %q: %v", prevURL, err)
 			return nil
 		}
 		prev, err := m.pw.GetSeries(prevID)
 		if err != nil {
-			log.Printf("get previous series %d: %v", prevID, err)
+			Errorf("get previous series %d: %v", prevID, err)
 			return nil
 		}
 		if _, ok := prev.Metadata[m.forge.MetaKeyPR()].(string); ok {
@@ -106,7 +107,7 @@ func (m *MLToForge) updateExistingPR(series, prev *patchwork.Series) error {
 	// post a comment about the update
 	comment := m.buildUpdateComment(series)
 	if err := m.forge.PostComment(prNumber, comment); err != nil {
-		log.Printf("failed to post update comment on PR #%d: %v", prNumber, err)
+		Errorf("failed to post update comment on PR #%d: %v", prNumber, err)
 	}
 
 	// copy the PR metadata to the new series
@@ -118,10 +119,10 @@ func (m *MLToForge) updateExistingPR(series, prev *patchwork.Series) error {
 	metadata[m.forge.MetaKeyBranch()] = branch
 
 	if err := m.pw.UpdateSeriesMetadata(series.ID, metadata); err != nil {
-		log.Printf("failed to update series %d metadata: %v", series.ID, err)
+		Errorf("failed to update series %d metadata: %v", series.ID, err)
 	}
 
-	log.Printf("updated PR #%d with series %d (v%d)", prNumber, series.ID, series.Version)
+	Infof("updated PR #%d with series %d (v%d)", prNumber, series.ID, series.Version)
 	return nil
 }
 
@@ -152,10 +153,10 @@ func (m *MLToForge) createNewPR(series *patchwork.Series) error {
 	metadata[m.forge.MetaKeyBranch()] = branch
 
 	if err := m.pw.UpdateSeriesMetadata(series.ID, metadata); err != nil {
-		log.Printf("failed to update series %d metadata: %v", series.ID, err)
+		Errorf("failed to update series %d metadata: %v", series.ID, err)
 	}
 
-	log.Printf("created PR #%d for series %d", prNumber, series.ID)
+	Infof("created PR #%d for series %d", prNumber, series.ID)
 	return nil
 }
 
@@ -191,7 +192,7 @@ func (m *MLToForge) branchName(series *patchwork.Series) string {
 		slug = slug[:50]
 		slug = strings.TrimRight(slug, "-")
 	}
-	return fmt.Sprintf("%s/%x/%s", m.branchPrefix, series.ID, slug)
+	return fmt.Sprintf("%s/%x/%s", m.git.conf.BranchPrefix, series.ID, slug)
 }
 
 func parseIDFromURL(url string) (int, error) {
@@ -348,7 +349,7 @@ func isDiffstatLine(line string) bool {
 func (m *MLToForge) HandleCommentCreated(event *patchwork.Event) error {
 	// skip comments originating from pwforge itself
 	if m.isOwnComment(event) {
-		log.Printf("skipping pwforge-originated comment event %d", event.ID)
+		Debugf("skipping pwforge-originated comment event %d", event.ID)
 		return nil
 	}
 
@@ -392,7 +393,7 @@ func (m *MLToForge) HandleCommentCreated(event *patchwork.Event) error {
 	}
 
 	if seriesID == 0 {
-		log.Printf("could not determine series for comment event %d", event.ID)
+		Warnf("could not determine series for comment event %d", event.ID)
 		return nil
 	}
 
@@ -403,7 +404,7 @@ func (m *MLToForge) HandleCommentCreated(event *patchwork.Event) error {
 
 	prRef, ok := series.Metadata[m.forge.MetaKeyPR()].(string)
 	if !ok || prRef == "" {
-		log.Printf("series %d has no sync PR, skipping comment", seriesID)
+		Infof("series %d has no sync PR, skipping comment", seriesID)
 		return nil
 	}
 

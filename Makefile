@@ -38,7 +38,7 @@ local:
 format:
 	gofmt -w .
 
-license_exclude = LICENSE *.md *.asc .* config.example.ini go.mod go.sum *.patch *.cf local
+license_exclude = LICENSE *.md *.asc .* config.example.ini go.mod go.sum *.patch *.cf local deploy
 
 .PHONY: lint
 lint:

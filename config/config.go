@@ -6,18 +6,23 @@ package config
 import (
 	"fmt"
 	"net/mail"
+	"strings"
 
 	"gopkg.in/ini.v1"
 )
 
 type Config struct {
+	Path      string          `ini:"-"`
 	Listen    string          `ini:"listen"`
+	BaseURL   string          `ini:"base-url"`
 	Forge     string          `ini:"forge"`
+	QueueSize int             `ini:"queue-size"`
 	Patchwork PatchworkConfig `ini:"patchwork"`
 	GitHub    GitHubConfig    `ini:"github"`
 	SMTP      SMTPConfig      `ini:"smtp"`
 	Git       GitConfig       `ini:"git"`
 	Sync      SyncConfig      `ini:"sync"`
+	Projects  map[string]*ProjectConfig
 }
 
 type SyncConfig struct {
@@ -30,6 +35,7 @@ type PatchworkConfig struct {
 	Token         string `ini:"token"`
 	WebhookSecret string `ini:"webhook-secret"`
 	Project       string `ini:"project"`
+	CacheTTL      int    `ini:"cache-ttl"`
 }
 
 type GitHubConfig struct {
@@ -38,10 +44,6 @@ type GitHubConfig struct {
 	InstallationID int64  `ini:"installation-id"`
 	PrivateKeyFile string `ini:"private-key-file"`
 	WebhookSecret  string `ini:"webhook-secret"`
-	Owner          string `ini:"owner"`
-	Repo           string `ini:"repo"`
-	ForkOwner      string `ini:"fork-owner"`
-	ForkRepo       string `ini:"fork-repo"`
 	APIURL         string `ini:"api-url"`
 }
 
@@ -73,11 +75,20 @@ type GitConfig struct {
 	SubjectPrefix string `ini:"subject-prefix"`
 }
 
+type ProjectConfig struct {
+	Owner         string `ini:"owner"`
+	Repo          string `ini:"repo"`
+	ForkOwner     string `ini:"fork-owner"`
+	ForkRepo      string `ini:"fork-repo"`
+	SubjectPrefix string `ini:"subject-prefix"`
+}
+
 func LoadConfig(path string) (*Config, error) {
 	cfg := &Config{
-		Listen: ":8080",
-		Forge:  "github",
-		GitHub: GitHubConfig{},
+		Listen:    ":8080",
+		Forge:     "github",
+		QueueSize: 10,
+		GitHub:    GitHubConfig{},
 		SMTP: SMTPConfig{
 			Port:       587,
 			Encryption: "tls",
@@ -87,11 +98,17 @@ func LoadConfig(path string) (*Config, error) {
 			ForgeToML: true,
 		},
 		Git: GitConfig{
-			MirrorPath:    "/var/cache/pwforge/repo.git",
+			MirrorPath:    "/var/cache/pwforge",
 			BranchPrefix:  "pwforge",
 			SubjectPrefix: "PATCH",
 		},
+		Patchwork: PatchworkConfig{
+			CacheTTL: 600,
+		},
+		Projects: make(map[string]*ProjectConfig),
 	}
+
+	cfg.Path = path
 
 	if path != "" {
 		f, err := ini.Load(path)
@@ -100,6 +117,25 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		if err := f.MapTo(cfg); err != nil {
 			return nil, fmt.Errorf("parse config: %w", err)
+		}
+
+		// parse [project "linkname"] sections
+		for _, sec := range f.Sections() {
+			name := sec.Name()
+			if !strings.HasPrefix(name, "project ") {
+				continue
+			}
+			linkName := strings.Trim(
+				strings.TrimPrefix(name, "project"), " \"")
+			if linkName == "" {
+				continue
+			}
+			p := &ProjectConfig{}
+			if err := sec.MapTo(p); err != nil {
+				return nil, fmt.Errorf(
+					"parse project %q: %w", linkName, err)
+			}
+			cfg.Projects[linkName] = p
 		}
 	}
 

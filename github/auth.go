@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 
+	gh "github.com/google/go-github/v84/github"
+
 	"github.com/bradleyfalzon/ghinstallation/v2"
 )
 
@@ -23,6 +25,13 @@ func NewTokenSourcePAT(token string) *TokenSource {
 func NewTokenSourceApp(
 	appID, installationID int64, keyPath string,
 ) (*TokenSource, error) {
+	if installationID == 0 {
+		id, err := discoverInstallation(appID, keyPath)
+		if err != nil {
+			return nil, err
+		}
+		installationID = id
+	}
 	tr, err := ghinstallation.NewKeyFromFile(
 		http.DefaultTransport, appID, installationID, keyPath,
 	)
@@ -30,6 +39,28 @@ func NewTokenSourceApp(
 		return nil, fmt.Errorf("github app transport: %w", err)
 	}
 	return &TokenSource{transport: tr}, nil
+}
+
+func discoverInstallation(appID int64, keyPath string) (int64, error) {
+	appTr, err := ghinstallation.NewAppsTransportKeyFromFile(
+		http.DefaultTransport, appID, keyPath,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("github app JWT transport: %w", err)
+	}
+	client := gh.NewClient(&http.Client{Transport: appTr})
+	installations, _, err := client.Apps.ListInstallations(
+		context.Background(), nil,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("list installations: %w", err)
+	}
+	if len(installations) == 0 {
+		return 0, fmt.Errorf(
+			"no installations found for app %d: "+
+				"install the app on your repos first", appID)
+	}
+	return installations[0].GetID(), nil
 }
 
 func (ts *TokenSource) Token() (string, error) {

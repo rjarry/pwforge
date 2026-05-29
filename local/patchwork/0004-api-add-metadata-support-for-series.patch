@@ -1,7 +1,7 @@
-From 6fa6bd17a5bc1f9257ffea948a5fe214a5150b17 Mon Sep 17 00:00:00 2001
+From e5a56632303ca9101c8121c58471bfdb92f61900 Mon Sep 17 00:00:00 2001
 From: Robin Jarry <robin@jarry.cc>
 Date: Sun, 24 May 2026 19:09:59 +0200
-Subject: [PATCH 4/6] api: add metadata support for series
+Subject: [PATCH 4/5] api: add metadata support for series
 
 Add a SeriesMetadata model to store arbitrary key-value metadata on
 series for external integrations (e.g. linking to a GitHub PR or a CI
@@ -16,22 +16,30 @@ The REST API presents metadata as a flat dict for convenience.
 Maintainers can update metadata via PATCH with a JSON object. Setting a
 key to null deletes it. The API contract is part of version 1.5.
 
+Show the series metadata key/value pairs on the patch detail page
+when metadata is present. This allows seeing external integration
+data (e.g. forge PR references) directly in the web UI.
+
 Signed-off-by: Robin Jarry <rjarry@redhat.com>
 ---
- patchwork/admin.py                           |  9 ++++
- patchwork/api/filters.py                     |  8 ++++
- patchwork/api/series.py                      | 48 ++++++++++++++++++--
- patchwork/migrations/0050_series_metadata.py | 44 ++++++++++++++++++
- patchwork/models.py                          | 27 +++++++++++
- patchwork/tests/api/test_series.py           | 40 +++++++++++++---
- 6 files changed, 165 insertions(+), 11 deletions(-)
+ patchwork/admin.py                            |  9 ++++
+ patchwork/api/filters.py                      |  8 ++++
+ patchwork/api/series.py                       | 48 +++++++++++++++++--
+ patchwork/migrations/0050_series_metadata.py  | 44 +++++++++++++++++
+ patchwork/models.py                           | 27 +++++++++++
+ patchwork/templates/patchwork/submission.html | 10 ++++
+ patchwork/templatetags/utils.py               |  9 ++++
+ patchwork/tests/api/test_series.py            | 40 +++++++++++++---
+ .../series-metadata-b2c3d4e5f6g7h8i9.yaml     | 15 ++++++
+ 9 files changed, 199 insertions(+), 11 deletions(-)
  create mode 100644 patchwork/migrations/0050_series_metadata.py
+ create mode 100644 releasenotes/notes/series-metadata-b2c3d4e5f6g7h8i9.yaml
 
 diff --git a/patchwork/admin.py b/patchwork/admin.py
-index d1c389a17b99..a26487850936 100644
+index 3ecf2280c5a5..73bca86f7ef3 100644
 --- a/patchwork/admin.py
 +++ b/patchwork/admin.py
-@@ -19,6 +19,7 @@ from patchwork.models import PatchRelation
+@@ -21,6 +21,7 @@ from patchwork.models import PatchRelation
  from patchwork.models import Person
  from patchwork.models import Project
  from patchwork.models import Series
@@ -39,7 +47,7 @@ index d1c389a17b99..a26487850936 100644
  from patchwork.models import SeriesReference
  from patchwork.models import State
  from patchwork.models import Tag
-@@ -181,6 +182,14 @@ class SeriesReferenceAdmin(admin.ModelAdmin):
+@@ -184,6 +185,14 @@ class SeriesReferenceAdmin(admin.ModelAdmin):
  admin.site.register(SeriesReference, SeriesReferenceAdmin)
  
  
@@ -282,6 +290,51 @@ index 8ed6a1cea037..37b90a74bf6c 100644
  class Bundle(models.Model):
      owner = models.ForeignKey(
          User,
+diff --git a/patchwork/templates/patchwork/submission.html b/patchwork/templates/patchwork/submission.html
+index cd74491c0e92..7be7f1966d80 100644
+--- a/patchwork/templates/patchwork/submission.html
++++ b/patchwork/templates/patchwork/submission.html
+@@ -97,6 +97,16 @@
+     </td>
+   </tr>
+ {% endif %}
++{% if submission.series.metadata.all %}
++  <tr>
++    <th>Metadata</th>
++    <td>
++{% for entry in submission.series.metadata.all %}
++      <strong>{{ entry.key }}:</strong> {{ entry.value|metadata_value }}{% if not forloop.last %} | {% endif %}
++{% endfor %}
++    </td>
++  </tr>
++{% endif %}
+ {% if submission.related %}
+   <tr>
+     <th>Related</th>
+diff --git a/patchwork/templatetags/utils.py b/patchwork/templatetags/utils.py
+index 78c0aac80fc8..198fa0468e7c 100644
+--- a/patchwork/templatetags/utils.py
++++ b/patchwork/templatetags/utils.py
+@@ -4,6 +4,7 @@
+ # SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ from django import template
++from django.utils.html import format_html
+ 
+ register = template.Library()
+ 
+@@ -16,3 +17,11 @@ def verbose_name_plural(obj):
+ @register.simple_tag
+ def is_editable(obj, user):
+     return obj.is_editable(user)
++
++
++@register.filter
++def metadata_value(value):
++    s = str(value)
++    if s.startswith(('http://', 'https://')):
++        return format_html('<a href="{}">{}</a>', s, s)
++    return format_html('<code>{}</code>', s)
 diff --git a/patchwork/tests/api/test_series.py b/patchwork/tests/api/test_series.py
 index 24d7d9a6899c..9a92e360c443 100644
 --- a/patchwork/tests/api/test_series.py
@@ -346,6 +399,27 @@ index 24d7d9a6899c..9a92e360c443 100644
 +            validate_response=False,
 +        )
 +        self.assertEqual(status.HTTP_403_FORBIDDEN, resp.status_code)
+diff --git a/releasenotes/notes/series-metadata-b2c3d4e5f6g7h8i9.yaml b/releasenotes/notes/series-metadata-b2c3d4e5f6g7h8i9.yaml
+new file mode 100644
+index 000000000000..4434a796f01a
+--- /dev/null
++++ b/releasenotes/notes/series-metadata-b2c3d4e5f6g7h8i9.yaml
+@@ -0,0 +1,15 @@
++---
++features:
++  - |
++    Series can now have arbitrary key-value metadata attached for external
++    integrations. Each metadata entry is stored as a separate row allowing
++    efficient querying and indexing. The patch detail page displays
++    metadata inline with URL values rendered as clickable links.
++api:
++  - |
++    Add ``metadata`` field to the series endpoint (v1.5). Metadata is
++    presented as a JSON object. Maintainers can update metadata via
++    PATCH, setting a key to null deletes it.
++  - |
++    Add ``metadata_key`` and ``metadata_value`` query filters to the
++    series list endpoint for filtering by metadata entries.
 -- 
 2.54.0
 

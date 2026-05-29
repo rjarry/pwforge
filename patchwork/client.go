@@ -160,6 +160,15 @@ func (c *Client) FindSeriesByMetadata(project, key, value string) ([]Series, err
 	return series, nil
 }
 
+func (c *Client) ListProjects() ([]Project, error) {
+	var projects []Project
+	err := c.doJSON("GET", "projects/", nil, &projects)
+	if err != nil {
+		return nil, err
+	}
+	return projects, nil
+}
+
 func (c *Client) ListSeries(project string) ([]Series, error) {
 	var series []Series
 	err := c.doJSON("GET", fmt.Sprintf("series/?project=%s&per_page=250", project), nil, &series)

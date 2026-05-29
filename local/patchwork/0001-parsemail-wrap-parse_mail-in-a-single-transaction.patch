@@ -1,7 +1,7 @@
-From b116d95f3d4cfaa6610d93f7fad6ebf012c54ed3 Mon Sep 17 00:00:00 2001
+From f70ed6560940951761b556f394ae2c8738b1648e Mon Sep 17 00:00:00 2001
 From: Robin Jarry <robin@jarry.cc>
 Date: Tue, 26 May 2026 13:33:01 +0200
-Subject: [PATCH 1/6] parsemail: wrap parse_mail() in a single transaction
+Subject: [PATCH 1/5] parsemail: wrap parse_mail() in a single transaction
 
 Wrap the entire parse_mail() call in transaction.atomic() so that all
 database writes from email parsing run inside a single transaction.
@@ -16,8 +16,10 @@ patch/series associations are committed.
 
 Signed-off-by: Robin Jarry <robin@jarry.cc>
 ---
- patchwork/management/commands/parsemail.py | 4 +++-
- 1 file changed, 3 insertions(+), 1 deletion(-)
+ patchwork/management/commands/parsemail.py                  | 4 +++-
+ .../notes/parsemail-transaction-d4e5f6g7h8i9j0k1.yaml       | 6 ++++++
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+ create mode 100644 releasenotes/notes/parsemail-transaction-d4e5f6g7h8i9j0k1.yaml
 
 diff --git a/patchwork/management/commands/parsemail.py b/patchwork/management/commands/parsemail.py
 index bcb257fe9714..2f90047a991b 100644
@@ -41,6 +43,18 @@ index bcb257fe9714..2f90047a991b 100644
              if result is None:
                  logger.warning('Nothing added to database')
          except DuplicateMailError as exc:
+diff --git a/releasenotes/notes/parsemail-transaction-d4e5f6g7h8i9j0k1.yaml b/releasenotes/notes/parsemail-transaction-d4e5f6g7h8i9j0k1.yaml
+new file mode 100644
+index 000000000000..37ebb0573906
+--- /dev/null
++++ b/releasenotes/notes/parsemail-transaction-d4e5f6g7h8i9j0k1.yaml
+@@ -0,0 +1,6 @@
++---
++fixes:
++  - |
++    Wrap the entire parse_mail() function in a single database
++    transaction to prevent partial state from being visible to
++    concurrent readers.
 -- 
 2.54.0
 

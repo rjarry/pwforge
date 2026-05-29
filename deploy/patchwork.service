@@ -1,0 +1,21 @@
+[Unit]
+Description=Patchwork uWSGI
+After=postgresql.service
+
+[Service]
+ExecStart=/usr/bin/uwsgi --ini /etc/uwsgi/apps-enabled/patchwork.ini
+Restart=always
+KillSignal=SIGQUIT
+Type=notify
+NotifyAccess=all
+User=www-data
+Group=www-data
+EnvironmentFile=/etc/default/patchwork
+RuntimeDirectory=patchwork
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

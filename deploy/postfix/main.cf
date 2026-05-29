@@ -1,0 +1,53 @@
+# Postfix configuration for pwforge patchwork mail ingestion.
+#
+# This instance only accepts mail from a designated upstream MTA and
+# delivers it to patchwork via a pipe transport. It does not relay
+# or deliver mail to local users.
+
+compatibility_level = 3.6
+
+# Replace with your actual hostname and domain.
+myhostname = patches.example.com
+mydomain = patches.example.com
+myorigin = $mydomain
+mydestination = $myhostname, localhost
+
+inet_interfaces = all
+inet_protocols = all
+
+# Only accept mail from the upstream MTA and localhost (for pwforge's
+# git send-email). Replace CHANGE_ME with the upstream MTA address.
+mynetworks = 127.0.0.0/8, [::1]/128
+smtpd_client_restrictions =
+	permit_mynetworks,
+	check_client_access cidr:/etc/postfix/client_access,
+	reject
+
+# Route list mail to patchwork parsemail pipe.
+header_checks = regexp:/etc/postfix/header_checks
+recipient_bcc_maps = hash:/etc/postfix/recipient_bcc
+transport_maps = hash:/etc/postfix/transport
+
+# Discard mail to unknown local users silently.
+local_recipient_maps =
+fallback_transport = discard:
+
+# Do not relay email, only allow local send
+smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination
+default_transport = smtp:
+relay_domains =
+relayhost =
+
+# Generous limits for patch series.
+message_size_limit = 52428800
+mailbox_size_limit = 0
+
+# Retry quickly on transient failures (e.g. database locks).
+minimal_backoff_time = 30s
+maximal_backoff_time = 300s
+queue_run_delay = 30s
+
+# DKIM
+milter_default_action = accept
+smtpd_milters = unix:/run/opendkim/opendkim.sock
+non_smtpd_milters = unix:/run/opendkim/opendkim.sock
