@@ -151,15 +151,11 @@ func (m *GitMirror) EnsureMirror() error {
 	if m.smtp.Username != "" {
 		gitConfig["sendemail.smtpUser"] = m.smtp.Username
 	}
-	for k, v := range gitConfig {
-		if err := m.git("-C", m.conf.MirrorPath, "config", k, v); err != nil {
-			return err
-		}
-	}
-	// write password separately to avoid logging it
 	if m.smtp.Password != "" {
-		if err := m.gitQuiet("-C", m.conf.MirrorPath, "config",
-			"sendemail.smtpPass", m.smtp.Password); err != nil {
+		gitConfig["sendemail.smtpPass"] = m.smtp.Password
+	}
+	for k, v := range gitConfig {
+		if err := m.gitQuiet("-C", m.conf.MirrorPath, "config", k, v); err != nil {
 			return err
 		}
 	}
@@ -178,7 +174,7 @@ func (m *GitMirror) SendPatches(
 	version int, extraHeaders ...string,
 ) error {
 	args := []string{
-		"-C", workdir, "send-email", "--force",
+		"-C", workdir, "send-email", "--force", "--quiet",
 		"--add-header=Reply-To: " + m.smtp.To,
 	}
 	for _, h := range extraHeaders {
@@ -245,7 +241,7 @@ func (m *GitMirror) SendEmail(
 
 	args := []string{
 		"-C", m.conf.MirrorPath,
-		"send-email", "--force",
+		"send-email", "--force", "--quiet",
 		"--from=" + from,
 		"--subject=" + subject,
 	}
@@ -317,8 +313,8 @@ func (m *GitMirror) gitQuiet(args ...string) error {
 		"GIT_CONFIG_SYSTEM=/dev/null",
 		"GIT_TERMINAL_PROMPT=0",
 	)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = Stdout
+	cmd.Stderr = Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("git config: %w", err)
 	}
@@ -327,8 +323,8 @@ func (m *GitMirror) gitQuiet(args ...string) error {
 
 func (m *GitMirror) git(args ...string) error {
 	cmd := m.gitCmd(args...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = Stdout
+	cmd.Stderr = Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s: %w", strings.Join(cmd.Args, " "), err)
 	}

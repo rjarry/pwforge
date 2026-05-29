@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"log/syslog"
 	"os"
@@ -15,31 +16,40 @@ var (
 	info *log.Logger
 	warn *log.Logger
 	err  *log.Logger
+
+	Stdout io.Writer
+	Stderr io.Writer
 )
 
-func LogInit(toSyslog bool) (e error) {
-	flags := log.Lshortfile
+func newSyslog(prio syslog.Priority) *log.Logger {
+	w, e := syslog.New(prio, "pwforge")
+	if e != nil {
+		log.Fatalf("error: syslog.New: %v", e)
+	}
+	switch prio {
+	case syslog.LOG_DEBUG:
+		Stdout = w
+	case syslog.LOG_WARNING:
+		Stderr = w
+	}
+	return log.New(w, "", log.Lshortfile)
+}
+
+func LogInit(toSyslog bool) {
 	if toSyslog {
-		if dbg, e = syslog.NewLogger(syslog.LOG_DEBUG, flags); e != nil {
-			return e
-		}
-		if info, e = syslog.NewLogger(syslog.LOG_INFO, flags); e != nil {
-			return e
-		}
-		if warn, e = syslog.NewLogger(syslog.LOG_WARNING, flags); e != nil {
-			return e
-		}
-		if err, e = syslog.NewLogger(syslog.LOG_ERR, flags); e != nil {
-			return e
-		}
+		dbg = newSyslog(syslog.LOG_DEBUG)
+		info = newSyslog(syslog.LOG_INFO)
+		warn = newSyslog(syslog.LOG_WARNING)
+		err = newSyslog(syslog.LOG_ERR)
 	} else {
-		flags |= log.Ldate | log.Ltime
+		const flags = log.Lshortfile | log.Ldate | log.Ltime
 		dbg = log.New(os.Stdout, "DEBUG ", flags)
 		info = log.New(os.Stdout, "INFO ", flags)
 		warn = log.New(os.Stdout, "WARN ", flags)
-		err = log.New(os.Stdout, "ERROR ", flags)
+		err = log.New(os.Stderr, "ERROR ", flags)
+		Stdout = os.Stdout
+		Stderr = os.Stderr
 	}
-	return nil
 }
 
 func logFormat(message string, args ...any) string {

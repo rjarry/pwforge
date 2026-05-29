@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,9 +24,7 @@ func main() {
 	flag.BoolVar(&syslog, "syslog", false, "log to syslog")
 	flag.Parse()
 
-	if err := LogInit(syslog); err != nil {
-		log.Fatalf("syslog: %v", err)
-	}
+	LogInit(syslog)
 
 	conf, err := config.LoadConfig(configPath)
 	if err != nil {
