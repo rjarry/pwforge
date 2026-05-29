@@ -196,6 +196,7 @@ func (g *ForgeToML) HandlePullRequest(event *models.ForgeEvent) error {
 		workdir, event.PRBase,
 		event.PRTitle, sanitizePRBody(event.PRBody),
 		event.PRBefore, inReplyTo, version,
+		EventHeader+": pull-request-"+event.PRAction,
 		PRHeader+": "+prURL,
 		BranchHeader+": "+event.PRHeadBranch,
 	)
